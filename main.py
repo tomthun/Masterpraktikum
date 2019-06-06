@@ -5,30 +5,32 @@ Created on Sun Jun  2 18:36:46 2019
 @author: Thomas
 """
 from CustomDataset import CustomDataset
-import NN
-import torch
+from CNN import SimpleCNN
 import numpy as np
 import pickle
-from torch.utils.data import Dataset, DataLoader
+import torch
+from torch.utils.data import DataLoader
 from torchvision import transforms, utils
 
-def main():
+params = {'batch_size': 1,
+          'shuffle': False,
+          'num_workers': 1}
+max_epochs = 100
+learning_rate = 1e-5
+
+def main(max_epochs, learning_rate, params):
     split = '4' 
     # train on the GPU or on the CPU, if a GPU is not available
-    dev = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-    root = 'C:\\Users\\Thomas\\Documents\\Python Scripts\\MasterPrak\\'
+    dev = torch.device('cuda')
+    # dev = torch.device('cpu')
+    root = 'C:\\Users\\Thomas\\Documents\\Python_Scripts\\MasterPrak_Data\\'
     train_data, train_labels, validation_data, validation_labels = de_serializeInput(root,split)
     train_dataset = CustomDataset(train_data,train_labels)
     validation_dataset = CustomDataset(validation_data,validation_labels)
-    # Construct our model by instantiating the class defined above
-    model = NN.CustomLayerNet(70,1024,1)
-    model = model.to(dev)
-    # Construct our loss function and an Optimizer. The call to model.parameters()
-    # in the SGD constructor will contain the learnable parameters of the two
-    # nn.Linear modules which are members of the model.
-    criterion = torch.nn.MSELoss(reduction='sum')
-    optimizer = torch.optim.SGD(model.parameters(), lr=1e-4)
-
+    train_loader = DataLoader(train_dataset, **params)
+    validation_loader = DataLoader(validation_dataset, **params)
+    train(train_loader, max_epochs, learning_rate, dev)
+    
 def de_serializeInput(root,split):    
     try:       
         print('Loading pickled files...')
@@ -91,5 +93,34 @@ def selectTestTrainSplit(train_data,x):
     rest = set(list(train_data.keys()))-set(split)
     return list(rest),split
 
-def train():
-    print ('To do')
+def train(train_loader, num_epochs, learning_rate, device):
+    model = SimpleCNN()
+    model = model.to(device)
+    loss_list = []
+    total_step = len(train_loader)
+    acc_list = []
+    criterion = torch.nn.CrossEntropyLoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    for epoch in range(num_epochs):
+        for i, (train, labels) in enumerate(train_loader):
+            # Run the forward pass
+            train, labels = train.to(device), labels.to(device)
+            outputs = model(train)
+            loss = criterion(outputs, labels)
+            loss_list.append(loss.item())
+    
+            # Backprop and perform Adam optimisation
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+    
+            # Track the accuracy
+            total = labels.size(0)
+            _, predicted = torch.max(outputs.data, 1)
+            correct = (predicted == labels).sum().item()
+            acc_list.append(correct / total)
+    
+            if (i + 1) % 100 == 0:
+                print('Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}, Accuracy: {:.2f}%'
+                      .format(epoch + 1, num_epochs, i + 1, total_step, loss.item(),
+                              (correct / total) * 100))

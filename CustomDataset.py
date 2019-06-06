@@ -17,7 +17,7 @@ class CustomDataset(Dataset):
         return len(self.features)   
     
     def __getitem__(self,idx):
-        X = torch.tensor(self.features[idx])
-        y = torch.tensor(self.labels[idx])
-        return {X,y}
+        X = torch.tensor(self.features[idx]).float()
+        y = torch.tensor(self.labels[idx]).float()
+        return X,y
     
