@@ -12,9 +12,9 @@ import torch
 from torch.utils.data import DataLoader
 from torchvision import transforms, utils
 
-params = {'batch_size': 1,
-          'shuffle': False,
-          'num_workers': 1}
+params = {'batch_size': 70,
+          'shuffle': True,
+          'num_workers': 0}
 max_epochs = 100
 learning_rate = 1e-5
 
@@ -66,7 +66,8 @@ def loaddata (root, data_name , training_name):
                 .replace('S','3').replace('T','4').replace('L','5')))
     count = 3
     for x in range(int((len(train_data)-4)/3)):
-            info[header] = [signalp, partition,seq,sig,sigbin]
+            if (len(seq) == 70):
+                info[header] = [signalp, partition,seq,sig,sigbin]
             seq = train_data[count+1]
             sig = train_data[count+2]
             sigbin = list(map(int,sig.replace('I','0').replace('M','1').replace('O','2')
@@ -105,7 +106,7 @@ def train(train_loader, num_epochs, learning_rate, device):
         for i, (train, labels) in enumerate(train_loader):
             # Run the forward pass
             train, labels = train.to(device), labels.to(device)
-            outputs = model(train)
+            outputs = model(train.unsqueeze(3))
             loss = criterion(outputs, labels)
             loss_list.append(loss.item())
     
