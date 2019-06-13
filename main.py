@@ -10,9 +10,8 @@ import numpy as np
 import pickle
 import torch
 from torch.utils.data import DataLoader
-from torchvision import transforms, utils
 
-params = {'batch_size': 500,
+params = {'batch_size': 250,
           'shuffle': True,
           'num_workers': 0}
 num_epochs = 100
@@ -22,14 +21,15 @@ def main(max_epochs, learning_rate, params):
     split = '4' 
     # train on the GPU or on the CPU, if a GPU is not available
     dev = torch.device('cuda')
-    # dev = torch.device('cpu')
+    #dev = torch.device('cpu')
     root = 'C:\\Users\\Thomas\\Documents\\Python_Scripts\\MasterPrak_Data\\'
     train_data, train_labels, validation_data, validation_labels = de_serializeInput(root,split)
     train_dataset = CustomDataset(train_data,train_labels)
     validation_dataset = CustomDataset(validation_data,validation_labels)
     train_loader = DataLoader(train_dataset, **params)
     validation_loader = DataLoader(validation_dataset, **params)
-    train(train_loader, max_epochs, learning_rate, dev)
+    model = train(train_loader, num_epochs, learning_rate, dev)
+    validate(validation_loader,model,dev)
     
 def de_serializeInput(root,split):    
     try:       
@@ -122,8 +122,8 @@ def train(train_loader, num_epochs, learning_rate, dev):
         for i, (train, labels) in enumerate(train_loader):
             # Run the forward pass
             train, labels = train.to(dev), labels.to(dev)
-            outputs = model(train.unsqueeze(2))
-            loss = criterion(outputs, labels.squeeze(-2))
+            outputs = model(train.unsqueeze(3))
+            loss = criterion(outputs.squeeze_(), labels.squeeze_())
             loss_list.append(loss.item())
     
             # Backprop and perform Adam optimisation
@@ -137,7 +137,26 @@ def train(train_loader, num_epochs, learning_rate, dev):
             correct = (predicted == labels).sum().item()
             acc_list.append(correct / total)
     
-            if (i + 1) % 100 == 0:
-                print('Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}, Accuracy: {:.2f}%'
-                      .format(epoch + 1, num_epochs, i + 1, total_step, loss.item(),
-                              (correct / total) * 100))
+            # and print the results
+            print('Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}, Accuracy: {:.2f}%'
+                  .format(epoch + 1, num_epochs, i + 1, total_step, loss.item(),
+                          (correct / total)))
+    return model
+
+def validate(validation_loader, model, dev):
+    total_step = len(validation_loader)
+    acc_list = []
+    for i, (validation, labels) in enumerate(validation_loader):
+            # Run the forward pass
+            validation, labels = validation.to(dev), labels.to(dev)
+            outputs = model(validation.unsqueeze(3))
+
+            # Track the accuracy
+            total = labels.size(0)
+            _, predicted = torch.max(outputs.data, 1)
+            correct = (predicted == labels).sum().item()
+            acc_list.append(correct / total)
+    
+            # and print the results
+            print('Batch [{}/{}], Accuracy: {:.2f}%'
+                  .format(i + 1, total_step, (correct / total)))

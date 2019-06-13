@@ -15,20 +15,19 @@ class SimpleCNN(nn.Module):
     def __init__(self):
         super(SimpleCNN, self).__init__()
         self.layer1 = nn.Sequential(
-            nn.Conv2d(1024, 32, kernel_size=(1,5), stride = (1,1), padding = (1,2)),
+            nn.Conv2d(1024, 6, kernel_size=(7,1),  padding = (3,0)),
             nn.ReLU()) 
         self.layer2 = nn.Sequential(
-            nn.Conv2d(32, 1, kernel_size=(1,3), stride=1, padding=1),
-            nn.ReLU(),
-            nn.MaxPool2d(kernel_size=2, stride=2))
-        self.fc1 = nn.Linear(1, 350)
+            nn.Conv1d(32, 1, kernel_size=(5,1),  padding=(2,1)),
+            nn.ReLU())
+        self.fc1 = nn.Linear(350, 350)
         self.fc2 = nn.Linear(350, 6)
     
     def forward(self, x):
         out = self.layer1(x)
-        out = self.layer2(out)
-        out = out.reshape(out.size(0), -1)
+       # out = self.layer2(out)
+        #out = out.reshape(out.size(0), -1)
         #out = self.drop_out(out)
-       # out = self.fc1(out)
-       # out = self.fc2(out)
+        #out = self.fc1(out)
+        #out = self.fc2(out)
         return out
