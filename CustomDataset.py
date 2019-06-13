@@ -18,6 +18,6 @@ class CustomDataset(Dataset):
     
     def __getitem__(self,idx):
         X = torch.tensor(self.features[idx]).float().view(1024,70)
-        y = torch.tensor(self.labels[idx]).long().view(70,1)
+        y = torch.tensor(self.labels[idx]).long().view(1,70)
         return X,y
     

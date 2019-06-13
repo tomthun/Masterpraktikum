@@ -12,10 +12,10 @@ import torch
 from torch.utils.data import DataLoader
 from torchvision import transforms, utils
 
-params = {'batch_size': 70,
+params = {'batch_size': 500,
           'shuffle': True,
           'num_workers': 0}
-max_epochs = 100
+num_epochs = 100
 learning_rate = 1e-5
 
 def main(max_epochs, learning_rate, params):
@@ -94,20 +94,36 @@ def selectTestTrainSplit(train_data,x):
     rest = set(list(train_data.keys()))-set(split)
     return list(rest),split
 
-def train(train_loader, num_epochs, learning_rate, device):
+def calc_roc(test_pred, test_labels, predCutoff = 0.4):
+  tp = 0
+  fp = 0
+  tn = 0
+  fn = 0
+  for i, pred in enumerate(test_pred):
+    if pred.item() > predCutoff and test_labels[i][0] == 1:
+      tp = tp + 1
+    elif pred.item() > predCutoff:
+      fp = fp + 1
+    elif test_labels[i][0] == 1:
+      fn = fn + 1
+    else:
+      tn = tn + 1
+  return tp, fp, tn, fn
+
+def train(train_loader, num_epochs, learning_rate, dev):
     model = SimpleCNN()
-    model = model.to(device)
+    model = model.to(dev)
     loss_list = []
     total_step = len(train_loader)
     acc_list = []
-    criterion = torch.nn.CrossEntropyLoss()
+    criterion = torch.nn.CrossEntropyLoss(reduction = 'mean')
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     for epoch in range(num_epochs):
         for i, (train, labels) in enumerate(train_loader):
             # Run the forward pass
-            train, labels = train.to(device), labels.to(device)
-            outputs = model(train.unsqueeze(3))
-            loss = criterion(outputs, labels)
+            train, labels = train.to(dev), labels.to(dev)
+            outputs = model(train.unsqueeze(2))
+            loss = criterion(outputs, labels.squeeze(-2))
             loss_list.append(loss.item())
     
             # Backprop and perform Adam optimisation
