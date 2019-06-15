@@ -24,7 +24,7 @@ def cross_validate():
     acc_list = [] 
     epoch_list = []
     print('Starting cross-validation...')
-    for splits in range(int(split)):
+    for splits in range(int(split)+1):
         acc, epoch = main(str(splits))
         acc_list.append(acc)
         epoch_list.append(epoch)
