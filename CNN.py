@@ -5,8 +5,6 @@ Created on Mon Jun  3 23:34:48 2019
 @author: Thomas
 """
 
-from torch.autograd import Variable
-import torch.nn.functional as F
 import torch.nn as nn
 
 class SimpleCNN(nn.Module):
@@ -18,14 +16,14 @@ class SimpleCNN(nn.Module):
             nn.Conv2d(1024, 6, kernel_size=(7,1),  padding = (3,0)),
             nn.ReLU()) 
         self.layer2 = nn.Sequential(
-            nn.Conv1d(32, 1, kernel_size=(5,1),  padding=(2,1)),
+            nn.Conv1d(6, 6, kernel_size=(5,1),  padding=(2,0)),
             nn.ReLU())
         self.fc1 = nn.Linear(350, 350)
         self.fc2 = nn.Linear(350, 6)
     
     def forward(self, x):
         out = self.layer1(x)
-       # out = self.layer2(out)
+        #out = self.layer2(out)
         #out = out.reshape(out.size(0), -1)
         #out = self.drop_out(out)
         #out = self.fc1(out)

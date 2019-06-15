@@ -10,15 +10,33 @@ import numpy as np
 import pickle
 import torch
 from torch.utils.data import DataLoader
+import os
 
 params = {'batch_size': 250,
           'shuffle': True,
           'num_workers': 0}
 num_epochs = 100
 learning_rate = 1e-5
+split = '4' 
+cross_validation = True
 
-def main(max_epochs, learning_rate, params):
-    split = '4' 
+def cross_validate():
+    acc_list = [] 
+    epoch_list = []
+    print('Starting cross-validation...')
+    for splits in range(int(split)):
+        acc, epoch = main(str(splits))
+        acc_list.append(acc)
+        epoch_list.append(epoch)
+        if (epoch/num_epochs) == 1:
+            print('No overfitting!')
+        else:
+            print('Overfitting after epoch:', epoch,'!')
+    print('Mean of the accuracy:', (sum(acc_list)/len(acc_list)))     
+    return acc_list, epoch_list
+
+def main(split):
+    print('Validationset is:', split)
     # train on the GPU or on the CPU, if a GPU is not available
     dev = torch.device('cuda')
     #dev = torch.device('cpu')
@@ -28,9 +46,16 @@ def main(max_epochs, learning_rate, params):
     validation_dataset = CustomDataset(validation_data,validation_labels)
     train_loader = DataLoader(train_dataset, **params)
     validation_loader = DataLoader(validation_dataset, **params)
-    model = train(train_loader, num_epochs, learning_rate, dev)
-    validate(validation_loader,model,dev)
-    
+    if cross_validation and os.path.isfile(root + 'model.pickle') and split != '0':
+        model = torch.load(root + 'model.pickle')
+    else:    
+        model = SimpleCNN()
+        model = model.to(dev)
+    model,epoch = train(model, train_loader, validation_loader, num_epochs, learning_rate, dev)
+    acc = validate(validation_loader,model,dev)
+    torch.save(model, root + 'model.pickle')
+    return acc, epoch
+
 def de_serializeInput(root,split):    
     try:       
         print('Loading pickled files...')
@@ -110,9 +135,8 @@ def calc_roc(test_pred, test_labels, predCutoff = 0.4):
       tn = tn + 1
   return tp, fp, tn, fn
 
-def train(train_loader, num_epochs, learning_rate, dev):
-    model = SimpleCNN()
-    model = model.to(dev)
+def train(model, train_loader, validation_loader, num_epochs, learning_rate, dev):
+    print('Starting to learn...')
     loss_list = []
     total_step = len(train_loader)
     acc_list = []
@@ -123,7 +147,8 @@ def train(train_loader, num_epochs, learning_rate, dev):
             # Run the forward pass
             train, labels = train.to(dev), labels.to(dev)
             outputs = model(train.unsqueeze(3))
-            loss = criterion(outputs.squeeze_(), labels.squeeze_())
+            outputs, labels = outputs.squeeze_(), labels.squeeze_()
+            loss = criterion(outputs, labels)
             loss_list.append(loss.item())
     
             # Backprop and perform Adam optimisation
@@ -132,31 +157,41 @@ def train(train_loader, num_epochs, learning_rate, dev):
             optimizer.step()
     
             # Track the accuracy
-            total = labels.size(0)
+            total = labels.size(0)* labels.size(1)
             _, predicted = torch.max(outputs.data, 1)
-            correct = (predicted == labels).sum().item()
-            acc_list.append(correct / total)
-    
+            correct = (predicted.squeeze_() == labels).sum().item()
+            
             # and print the results
+        if (epoch%5) == 0:
             print('Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}, Accuracy: {:.2f}%'
                   .format(epoch + 1, num_epochs, i + 1, total_step, loss.item(),
-                          (correct / total)))
-    return model
-
+                          (correct / total)*100))
+            acc = validate(validation_loader, model, dev)
+            acc_list.append((acc,num_epochs))
+    
+    # check overfitting
+    print('Best accurarcy:', max(acc_list)[0]  ,' at epoch:', max(acc_list)[1])
+    return model, max(acc_list)[1]
+    
 def validate(validation_loader, model, dev):
-    total_step = len(validation_loader)
-    acc_list = []
-    for i, (validation, labels) in enumerate(validation_loader):
-            # Run the forward pass
+    model.eval()
+    with torch.no_grad():
+        correct = 0
+        total = 0
+        for validation, labels in validation_loader:
             validation, labels = validation.to(dev), labels.to(dev)
             outputs = model(validation.unsqueeze(3))
-
-            # Track the accuracy
-            total = labels.size(0)
             _, predicted = torch.max(outputs.data, 1)
-            correct = (predicted == labels).sum().item()
-            acc_list.append(correct / total)
-    
-            # and print the results
-            print('Batch [{}/{}], Accuracy: {:.2f}%'
-                  .format(i + 1, total_step, (correct / total)))
+            labels, predicted = predicted.squeeze_(), labels.squeeze_()       
+            correct += (predicted == labels).sum().item()
+            total = total + (labels.size(0) * labels.size(1))
+            result = ((correct / total) * 100)
+        print('Test Accuracy of the model on the validation proteins is: {} %'.format(result))
+    return result
+
+if __name__ == "__main__":
+    if cross_validation == True:
+        acc_list, epoch_list = cross_validate()
+    else:
+        main(split)
+        
