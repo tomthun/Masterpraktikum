@@ -11,14 +11,21 @@ import pickle
 import torch
 from torch.utils.data import DataLoader
 import os
+import time
+import matplotlib.pyplot as plt
 
 params = {'batch_size': 250,
           'shuffle': True,
           'num_workers': 0}
-num_epochs = 100
-learning_rate = 1e-5
+num_epochs = 106
+learning_rate = 1e-4
 split = '4' 
-cross_validation = True
+cross_validation = False
+timer = time.time()
+#--------------- parameterize grid search here ---------------
+grid_search = False
+all_num_epochs = (50,100,150,200)
+all_learning_rate = (1e-2,1e-3,1e-4,1e-5)
 
 def cross_validate():
     acc_list = [] 
@@ -51,10 +58,12 @@ def main(split):
     else:    
         model = SimpleCNN()
         model = model.to(dev)
-    model,epoch = train(model, train_loader, validation_loader, num_epochs, learning_rate, dev)
-    acc = validate(validation_loader,model,dev)
+    model, acc_val_list, acc_train_list = train(model, train_loader, validation_loader, num_epochs, learning_rate, dev)
+    best_val_acc = max(acc_val_list)[0]
+    best_epoch = max(acc_val_list)[1]
+    create_plts(acc_val_list, acc_train_list, root, split)
     torch.save(model, root + 'model.pickle')
-    return acc, epoch
+    return best_val_acc, best_epoch
 
 def de_serializeInput(root,split):    
     try:       
@@ -119,27 +128,12 @@ def selectTestTrainSplit(train_data,x):
     rest = set(list(train_data.keys()))-set(split)
     return list(rest),split
 
-def calc_roc(test_pred, test_labels, predCutoff = 0.4):
-  tp = 0
-  fp = 0
-  tn = 0
-  fn = 0
-  for i, pred in enumerate(test_pred):
-    if pred.item() > predCutoff and test_labels[i][0] == 1:
-      tp = tp + 1
-    elif pred.item() > predCutoff:
-      fp = fp + 1
-    elif test_labels[i][0] == 1:
-      fn = fn + 1
-    else:
-      tn = tn + 1
-  return tp, fp, tn, fn
-
 def train(model, train_loader, validation_loader, num_epochs, learning_rate, dev):
     print('Starting to learn...')
     loss_list = []
     total_step = len(train_loader)
-    acc_list = []
+    acc_val_list = []
+    acc_train_list = []
     criterion = torch.nn.CrossEntropyLoss(reduction = 'mean')
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     for epoch in range(num_epochs):
@@ -163,16 +157,17 @@ def train(model, train_loader, validation_loader, num_epochs, learning_rate, dev
             
             # and print the results
         if (epoch%5) == 0:
+            result = (correct / total)*100
             print('Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}, Accuracy: {:.2f}%'
                   .format(epoch + 1, num_epochs, i + 1, total_step, loss.item(),
-                          (correct / total)*100))
+                          result))
             acc = validate(validation_loader, model, dev)
-            acc_list.append((acc,num_epochs))
-    
+            acc_val_list.append((acc,epoch))
+            acc_train_list.append((result,epoch))
     # check overfitting
-    print('Best accurarcy:', max(acc_list)[0]  ,' at epoch:', max(acc_list)[1])
-    return model, max(acc_list)[1]
-    
+    print('Best accurarcy:', max(acc_val_list)[0]  ,' at epoch:', max(acc_val_list)[1])
+    return model, acc_val_list, acc_train_list
+
 def validate(validation_loader, model, dev):
     model.eval()
     with torch.no_grad():
@@ -189,9 +184,23 @@ def validate(validation_loader, model, dev):
         print('Test Accuracy of the model on the validation proteins is: {} %'.format(result))
     return result
 
+def create_plts(acc_val_list, acc_train_list, root, split):
+    plt.plot([x[1] for x in acc_val_list], [x[0] for x in acc_val_list],  label='Accuracy on the validation data')
+    plt.plot([x[1] for x in acc_train_list], [x[0] for x in acc_train_list],  label='Accuracy on the train data')
+    plt.legend()
+    plt.xlabel('Number of epochs')
+    plt.ylabel('Model accuracy in %')
+    plt.savefig(root + 'Pictures\\acc_plot_lr_' + str(learning_rate) + '_epochs_' + str(num_epochs) + '_split_'+split+'.png')
+    
 if __name__ == "__main__":
     if cross_validation == True:
         acc_list, epoch_list = cross_validate()
+    elif grid_search:
+        for x in range(len(all_num_epochs)):
+            for y in range(len(all_learning_rate)):
+                num_epochs = all_num_epochs[x]
+                learning_rate = all_learning_rate[y]
+                main(split)
     else:
         main(split)
-        
+    print("Runtime: ", time.time() - timer)
