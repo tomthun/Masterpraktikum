@@ -13,15 +13,23 @@ from torch.utils.data import DataLoader
 import os
 import time
 import matplotlib.pyplot as plt
+import sklearn.metrics as metrics
 
+timer = time.time()
+
+#--------------- parameterize hyperparameters ---------------
 params = {'batch_size': 250,
           'shuffle': True,
           'num_workers': 0}
-num_epochs = 106
+num_epochs = 137
 learning_rate = 1e-4
 split = '4' 
-cross_validation = False
-timer = time.time()
+weights = [0.3, 0.98, 0.82, 0.95, 0.99, 0.98]
+class_weights = torch.FloatTensor(weights).cuda()
+
+#--------------- Cross Validation ---------------
+cross_validation = True
+
 #--------------- parameterize grid search here ---------------
 grid_search = False
 all_num_epochs = (50,100,150,200)
@@ -32,7 +40,7 @@ def cross_validate():
     epoch_list = []
     print('Starting cross-validation...')
     for splits in range(int(split)+1):
-        acc, epoch = main(str(splits))
+        acc, epoch = main(str(splits), class_weights)
         acc_list.append(acc)
         epoch_list.append(epoch)
         if (epoch/num_epochs) == 1:
@@ -42,13 +50,13 @@ def cross_validate():
     print('Mean of the accuracy:', (sum(acc_list)/len(acc_list)))     
     return acc_list, epoch_list
 
-def main(split):
+def main(split, class_weights):
     print('Validationset is:', split)
     # train on the GPU or on the CPU, if a GPU is not available
     dev = torch.device('cuda')
     #dev = torch.device('cpu')
     root = 'C:\\Users\\Thomas\\Documents\\Python_Scripts\\MasterPrak_Data\\'
-    train_data, train_labels, validation_data, validation_labels = de_serializeInput(root,split)
+    train_data, train_labels, validation_data, validation_labels, info = de_serializeInput(root,split)
     train_dataset = CustomDataset(train_data,train_labels)
     validation_dataset = CustomDataset(validation_data,validation_labels)
     train_loader = DataLoader(train_dataset, **params)
@@ -58,14 +66,17 @@ def main(split):
     else:    
         model = SimpleCNN()
         model = model.to(dev)
-    model, acc_val_list, acc_train_list = train(model, train_loader, validation_loader, num_epochs, learning_rate, dev)
+    model, acc_val_list, acc_train_list, mcc_val_list, mcc_train_list = train(model, 
+                                                    train_loader, validation_loader, num_epochs,
+                                                    learning_rate, class_weights, dev)
     best_val_acc = max(acc_val_list)[0]
     best_epoch = max(acc_val_list)[1]
-    create_plts(acc_val_list, acc_train_list, root, split)
+    create_plts(acc_val_list, acc_train_list, mcc_val_list, mcc_train_list, root, split)
     torch.save(model, root + 'model.pickle')
     return best_val_acc, best_epoch
 
 def de_serializeInput(root,split):    
+    all_features, info = loaddata(root,'signalP4.npz', 'train_set.fasta')
     try:       
         print('Loading pickled files...')
         train_data = pickle.load(open(root+"pickled_files\\train"+split+".pickle", "rb"))
@@ -75,7 +86,6 @@ def de_serializeInput(root,split):
         print('Done!')
     except (OSError, IOError):     
         print('Pickled files not found!\nCreating new train/validation dataset...')
-        all_features, info = loaddata(root,'signalP4.npz', 'train_set.fasta')
         train_keys, validation_keys = selectTestTrainSplit(info,split)
         train_data, train_labels = createDataVectors(info,all_features,train_keys)
         validation_data, validation_labels = createDataVectors(info,all_features, validation_keys)
@@ -84,7 +94,7 @@ def de_serializeInput(root,split):
         pickle.dump(train_labels, open( root+"pickled_files\\train_label"+split+".pickle", "wb" ))
         pickle.dump(validation_labels, open( root+"pickled_files\\validation_label"+split+".pickle", "wb" ))
         print('Saved and Done!')
-    return train_data,train_labels,validation_data,validation_labels
+    return train_data,train_labels,validation_data,validation_labels,info
        
 def loaddata (root, data_name , training_name):
     train_data = open(root+training_name, 'r') 
@@ -128,13 +138,35 @@ def selectTestTrainSplit(train_data,x):
     rest = set(list(train_data.keys()))-set(split)
     return list(rest),split
 
-def train(model, train_loader, validation_loader, num_epochs, learning_rate, dev):
+def calcClassImbalance(info):
+    counts = [0,0,0,0,0,0]
+    for x in info:
+        classes = info[x][3]
+        counts[0] = counts[0] + classes.count('I')
+        counts[1] = counts[1] + classes.count('M')
+        counts[2] = counts[2] + classes.count('O')
+        counts[3] = counts[3] + classes.count('S')
+        counts[4] = counts[4] + classes.count('T')
+        counts[5] = counts[5] + classes.count('L')
+    return counts
+
+def calcMCCbatch (labels, predicted):
+    predicted, labels = predicted.to('cpu'), labels.to('cpu')
+    mcc = 0
+    for x in range(labels.size()[1]):
+        mcc += metrics.matthews_corrcoef(predicted[x], labels[x])
+    result = mcc/labels.size()[1]
+    return result
+    
+def train(model, train_loader, validation_loader, num_epochs, learning_rate, class_weights, dev):
     print('Starting to learn...')
     loss_list = []
     total_step = len(train_loader)
     acc_val_list = []
     acc_train_list = []
-    criterion = torch.nn.CrossEntropyLoss(reduction = 'mean')
+    mcc_val_list = []
+    mcc_train_list = []
+    criterion = torch.nn.CrossEntropyLoss(weight = class_weights, reduction = 'mean')
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     for epoch in range(num_epochs):
         for i, (train, labels) in enumerate(train_loader):
@@ -153,20 +185,24 @@ def train(model, train_loader, validation_loader, num_epochs, learning_rate, dev
             # Track the accuracy
             total = labels.size(0)* labels.size(1)
             _, predicted = torch.max(outputs.data, 1)
-            correct = (predicted.squeeze_() == labels).sum().item()
+            predicted = predicted.squeeze_()
+            correct = (predicted == labels).sum().item()
             
             # and print the results
         if (epoch%5) == 0:
             result = (correct / total)*100
-            print('Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}, Accuracy: {:.2f}%'
+            mcc_train = calcMCCbatch(labels, predicted)
+            print('Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}, Accuracy: {:.2f}%, MCC: {:.2f}'
                   .format(epoch + 1, num_epochs, i + 1, total_step, loss.item(),
-                          result))
-            acc = validate(validation_loader, model, dev)
+                          result, mcc_train))
+            acc, mcc_val = validate(validation_loader, model, dev)
             acc_val_list.append((acc,epoch))
             acc_train_list.append((result,epoch))
+            mcc_val_list.append(mcc_val)
+            mcc_train_list.append(mcc_train)
     # check overfitting
     print('Best accurarcy:', max(acc_val_list)[0]  ,' at epoch:', max(acc_val_list)[1])
-    return model, acc_val_list, acc_train_list
+    return model, acc_val_list, acc_train_list, mcc_val_list, mcc_train_list
 
 def validate(validation_loader, model, dev):
     model.eval()
@@ -181,16 +217,25 @@ def validate(validation_loader, model, dev):
             correct += (predicted == labels).sum().item()
             total = total + (labels.size(0) * labels.size(1))
             result = ((correct / total) * 100)
-        print('Test Accuracy of the model on the validation proteins is: {} %'.format(result))
-    return result
+            mcc = calcMCCbatch(labels, predicted)
+        print('Test Accuracy of the model on the validation proteins is: {:.2f}%, MCC is: {:.2f}'.format(result,mcc))
+    return result, mcc
 
-def create_plts(acc_val_list, acc_train_list, root, split):
+def create_plts(acc_val_list, acc_train_list, mcc_val_list, mcc_train_list, root, split):
     plt.plot([x[1] for x in acc_val_list], [x[0] for x in acc_val_list],  label='Accuracy on the validation data')
     plt.plot([x[1] for x in acc_train_list], [x[0] for x in acc_train_list],  label='Accuracy on the train data')
     plt.legend()
     plt.xlabel('Number of epochs')
     plt.ylabel('Model accuracy in %')
+    plt.close()
     plt.savefig(root + 'Pictures\\acc_plot_lr_' + str(learning_rate) + '_epochs_' + str(num_epochs) + '_split_'+split+'.png')
+    plt.plot([x[1] for x in acc_val_list], [x for x in mcc_val_list],  label='MCC of the validation data')
+    plt.plot([x[1] for x in acc_train_list], [x for x in mcc_train_list],  label='MCC of the train data')
+    plt.legend()
+    plt.xlabel('Number of epochs')
+    plt.ylabel('Model MCC')
+    plt.savefig(root + 'Pictures\\mcc_plot_lr_' + str(learning_rate) + '_epochs_' + str(num_epochs) + '_split_'+split+'.png')
+    plt.close()
     
 if __name__ == "__main__":
     if cross_validation == True:
@@ -202,5 +247,5 @@ if __name__ == "__main__":
                 learning_rate = all_learning_rate[y]
                 main(split)
     else:
-        main(split)
+        main(split, class_weights)
     print("Runtime: ", time.time() - timer)
