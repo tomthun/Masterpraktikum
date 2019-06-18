@@ -169,6 +169,7 @@ def train(model, train_loader, validation_loader, num_epochs, learning_rate, cla
     criterion = torch.nn.CrossEntropyLoss(weight = class_weights, reduction = 'mean')
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     for epoch in range(num_epochs):
+        mcc_train_sum =  []
         for i, (train, labels) in enumerate(train_loader):
             # Run the forward pass
             train, labels = train.to(dev), labels.to(dev)
@@ -187,19 +188,22 @@ def train(model, train_loader, validation_loader, num_epochs, learning_rate, cla
             _, predicted = torch.max(outputs.data, 1)
             predicted = predicted.squeeze_()
             correct = (predicted == labels).sum().item()
+            mcc_train = calcMCCbatch(labels, predicted)
+            mcc_train_sum.append(mcc_train)
             
             # and print the results
         if (epoch%5) == 0:
             result = (correct / total)*100
-            mcc_train = calcMCCbatch(labels, predicted)
+            mcc_ave = sum(mcc_train_sum)/len(mcc_train_sum)
             print('Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}, Accuracy: {:.2f}%, MCC: {:.2f}'
                   .format(epoch + 1, num_epochs, i + 1, total_step, loss.item(),
-                          result, mcc_train))
+                          result, mcc_ave))
             acc, mcc_val = validate(validation_loader, model, dev)
             acc_val_list.append((acc,epoch))
             acc_train_list.append((result,epoch))
+            mcc_train_list.append(mcc_ave)
             mcc_val_list.append(mcc_val)
-            mcc_train_list.append(mcc_train)
+
     # check overfitting
     print('Best accurarcy:', max(acc_val_list)[0]  ,' at epoch:', max(acc_val_list)[1])
     return model, acc_val_list, acc_train_list, mcc_val_list, mcc_train_list
@@ -209,6 +213,7 @@ def validate(validation_loader, model, dev):
     with torch.no_grad():
         correct = 0
         total = 0
+        mcc_sum = []
         for validation, labels in validation_loader:
             validation, labels = validation.to(dev), labels.to(dev)
             outputs = model(validation.unsqueeze(3))
@@ -218,20 +223,24 @@ def validate(validation_loader, model, dev):
             total = total + (labels.size(0) * labels.size(1))
             result = ((correct / total) * 100)
             mcc = calcMCCbatch(labels, predicted)
-        print('Test Accuracy of the model on the validation proteins is: {:.2f}%, MCC is: {:.2f}'.format(result,mcc))
-    return result, mcc
+            mcc_sum.append(mcc)
+        true_mcc = (sum(mcc_sum)/len(mcc_sum))
+        print('Test Accuracy of the model on the validation proteins is: {:.2f}%, MCC is: {:.2f}'.format(result,true_mcc))
+    return result, true_mcc
 
 def create_plts(acc_val_list, acc_train_list, mcc_val_list, mcc_train_list, root, split):
     plt.plot([x[1] for x in acc_val_list], [x[0] for x in acc_val_list],  label='Accuracy on the validation data')
     plt.plot([x[1] for x in acc_train_list], [x[0] for x in acc_train_list],  label='Accuracy on the train data')
     plt.legend()
+    plt.title('Accuracy of split ' + split)
     plt.xlabel('Number of epochs')
-    plt.ylabel('Model accuracy in %')
-    plt.close()
+    plt.ylabel('Model accuracy in %') 
     plt.savefig(root + 'Pictures\\acc_plot_lr_' + str(learning_rate) + '_epochs_' + str(num_epochs) + '_split_'+split+'.png')
+    plt.close()
     plt.plot([x[1] for x in acc_val_list], [x for x in mcc_val_list],  label='MCC of the validation data')
     plt.plot([x[1] for x in acc_train_list], [x for x in mcc_train_list],  label='MCC of the train data')
     plt.legend()
+    plt.title('MCC of split ' + split)
     plt.xlabel('Number of epochs')
     plt.ylabel('Model MCC')
     plt.savefig(root + 'Pictures\\mcc_plot_lr_' + str(learning_rate) + '_epochs_' + str(num_epochs) + '_split_'+split+'.png')
