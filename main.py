@@ -25,10 +25,12 @@ num_epochs = 137
 learning_rate = 1e-4
 split = '4' 
 weights = [0.3, 0.98, 0.82, 0.95, 0.99, 0.98]
-class_weights = torch.FloatTensor(weights).cuda()
+#dev = torch.device('cuda')
+dev = torch.device('cpu')
+class_weights = torch.FloatTensor(weights).to(dev)
 
 #--------------- Cross Validation ---------------
-cross_validation = True
+cross_validation = False
 
 #--------------- parameterize grid search here ---------------
 grid_search = False
@@ -53,9 +55,7 @@ def cross_validate():
 def main(split, class_weights):
     print('Validationset is:', split)
     # train on the GPU or on the CPU, if a GPU is not available
-    dev = torch.device('cuda')
-    #dev = torch.device('cpu')
-    root = 'C:\\Users\\Thomas\\Documents\\Python_Scripts\\MasterPrak_Data\\'
+    root = 'C:\\Users\\Thomas\\Documents\\Uni_masters\\MasterPrak_Data\\'
     train_data, train_labels, validation_data, validation_labels, info = de_serializeInput(root,split)
     train_dataset = CustomDataset(train_data,train_labels)
     validation_dataset = CustomDataset(validation_data,validation_labels)
@@ -112,6 +112,10 @@ def loaddata (root, data_name , training_name):
     for x in range(int((len(train_data)-4)/3)):
             if (len(seq) == 70):
                 info[header] = [signalp, partition,seq,sig,sigbin]
+            else:
+                [sigbin.append('-100') for x in range (70 - len(sigbin))]
+                info[header] = [signalp, partition,seq,sig,sigbin]
+
             seq = train_data[count+1]
             sig = train_data[count+2]
             sigbin = list(map(int,sig.replace('I','0').replace('M','1').replace('O','2')
@@ -129,8 +133,15 @@ def createDataVectors(info, all_features, keys):
     data = []
     label = []
     for key in keys:
+        len_prot = len(info[key][4])
         label.append(info[key][4])
-        data.append(all_features[key][:70])
+        if len_prot < 70:
+            feat = all_features[key][:len_prot]
+            result = np.array([70,1024])
+            result[:feat.shape[0], feat.shape[1]] = feat
+            data.append(result)
+        else:
+            data.append(all_features[key][:70])
     return data,label
 
 def selectTestTrainSplit(train_data,x):
