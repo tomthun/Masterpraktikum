@@ -25,8 +25,8 @@ num_epochs = 137
 learning_rate = 1e-4
 split = '4' 
 weights = [0.3, 0.98, 0.82, 0.95, 0.99, 0.98]
-#dev = torch.device('cuda')
-dev = torch.device('cpu')
+dev = torch.device('cuda')
+#dev = torch.device('cpu')
 class_weights = torch.FloatTensor(weights).to(dev)
 
 #--------------- Cross Validation ---------------
@@ -110,20 +110,21 @@ def loaddata (root, data_name , training_name):
                 .replace('S','3').replace('T','4').replace('L','5')))
     count = 3
     for x in range(int((len(train_data)-4)/3)):
-            if (len(seq) == 70):
-                info[header] = [signalp, partition,seq,sig,sigbin]
-            else:
-                [sigbin.append('-100') for x in range (70 - len(sigbin))]
-                info[header] = [signalp, partition,seq,sig,sigbin]
-
-            seq = train_data[count+1]
-            sig = train_data[count+2]
-            sigbin = list(map(int,sig.replace('I','0').replace('M','1').replace('O','2')
-                .replace('S','3').replace('T','4').replace('L','5')))
-            header = train_data[count].split('|')[0].replace('>','')    
-            signalp = train_data[count].split('|')[2]
-            partition = train_data[count].split('|')[3]
-            count += 3
+        lenprot = 70
+        if (len(seq) == lenprot):
+            info[header] = [signalp, partition,seq,sig,sigbin,lenprot]
+        else:
+            lenprot = len(seq)
+            [sigbin.append(-100) for x in range (70 - lenprot)]
+            info[header] = [signalp, partition,seq,sig,sigbin,lenprot]
+        seq = train_data[count+1]
+        sig = train_data[count+2]
+        sigbin = list(map(int,sig.replace('I','0').replace('M','1').replace('O','2')
+            .replace('S','3').replace('T','4').replace('L','5')))
+        header = train_data[count].split('|')[0].replace('>','')    
+        signalp = train_data[count].split('|')[2]
+        partition = train_data[count].split('|')[3]
+        count += 3
     # remove invalid Proteinidentifiers
     for e in (set(list(info.keys()))-set(tmp.files)):
         info.pop(e)     
@@ -133,12 +134,12 @@ def createDataVectors(info, all_features, keys):
     data = []
     label = []
     for key in keys:
-        len_prot = len(info[key][4])
+        lenprot = info[key][5]
         label.append(info[key][4])
-        if len_prot < 70:
-            feat = all_features[key][:len_prot]
-            result = np.array([70,1024])
-            result[:feat.shape[0], feat.shape[1]] = feat
+        if lenprot < 70:
+            feat = all_features[key][:lenprot]
+            result = np.zeros([70,1024])
+            result[:feat.shape[0], :feat.shape[1]] = feat
             data.append(result)
         else:
             data.append(all_features[key][:70])
@@ -177,7 +178,7 @@ def train(model, train_loader, validation_loader, num_epochs, learning_rate, cla
     acc_train_list = []
     mcc_val_list = []
     mcc_train_list = []
-    criterion = torch.nn.CrossEntropyLoss(weight = class_weights, reduction = 'mean')
+    criterion = torch.nn.CrossEntropyLoss(weight = class_weights, ignore_index = -100, reduction = 'mean')
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     for epoch in range(num_epochs):
         mcc_train_sum =  []
