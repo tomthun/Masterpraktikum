@@ -30,7 +30,7 @@ dev = torch.device('cuda')
 class_weights = torch.FloatTensor(weights).to(dev)
 
 #--------------- Cross Validation ---------------
-cross_validation = False
+cross_validation = True
 
 #--------------- parameterize grid search here ---------------
 grid_search = False
@@ -186,7 +186,7 @@ def train(model, train_loader, validation_loader, num_epochs, learning_rate, cla
             # Run the forward pass
             train, labels = train.to(dev), labels.to(dev)
             outputs = model(train.unsqueeze(3))
-            outputs, labels = outputs.squeeze_(), labels.squeeze_()
+            outputs, labels = outputs.squeeze_(), labels
             loss = criterion(outputs, labels)
             loss_list.append(loss.item())
     
@@ -230,7 +230,7 @@ def validate(validation_loader, model, dev):
             validation, labels = validation.to(dev), labels.to(dev)
             outputs = model(validation.unsqueeze(3))
             _, predicted = torch.max(outputs.data, 1)
-            labels, predicted = predicted.squeeze_(), labels.squeeze_()       
+            labels, predicted = predicted.squeeze_(), labels   
             correct += (predicted == labels).sum().item()
             total = total + (labels.size(0) * labels.size(1))
             result = ((correct / total) * 100)
