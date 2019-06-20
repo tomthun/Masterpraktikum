@@ -23,7 +23,7 @@ root = 'C:\\Users\\Thomas\\Documents\\Uni_masters\\MasterPrak_Data\\'
 params = {'batch_size': 200,
           'shuffle': True,
           'num_workers': 0}
-num_epochs = 31
+num_epochs = 301
 learning_rate = 1e-4
 split = '4' 
 weights = [0.3, 0.98, 0.82, 0.95, 0.99, 0.98]
@@ -32,7 +32,7 @@ dev = torch.device('cuda')
 class_weights = torch.FloatTensor(weights).to(dev)
 
 #--------------- Cross Validation ---------------
-cross_validation = False
+cross_validation = True
 
 #--------------- parameterize grid search here ---------------
 grid_search = False
@@ -175,7 +175,7 @@ def calcMCCbatch (labels, predicted):
     for x in range(labels.size()[0]):
         mcc += metrics.matthews_corrcoef(predicted[x], labels[x])
         cm += confusion_matrix(labels[x], predicted[x],  [0, 1, 2, 3, 4, 5])
-    result = mcc/labels.size()[1]
+    result = mcc/labels.size()[0]
     return result,cm
     
 def train(model, train_loader, validation_loader, num_epochs, learning_rate, class_weights, dev):
