@@ -23,16 +23,17 @@ root = 'C:\\Users\\Thomas\\Documents\\Uni_masters\\MasterPrak_Data\\'
 params = {'batch_size': 200,
           'shuffle': True,
           'num_workers': 0}
-num_epochs = 301
-learning_rate = 1e-4
+num_epochs = 41
+learning_rate = 6e-4
 split = '4' 
 weights = [0.3, 0.98, 0.82, 0.95, 0.99, 0.98]
 dev = torch.device('cuda')
 #dev = torch.device('cpu')
 class_weights = torch.FloatTensor(weights).to(dev)
+printafterepoch = 2
 
 #--------------- Cross Validation ---------------
-cross_validation = True
+cross_validation = False
 
 #--------------- parameterize grid search here ---------------
 grid_search = False
@@ -44,7 +45,7 @@ def cross_validate():
     epoch_list = []
     print('Starting cross-validation...')
     for splits in range(int(split)+1):
-        acc, epoch = main(str(splits), class_weights)
+        acc, epoch, out = main(str(splits), class_weights)
         acc_list.append(acc)
         epoch_list.append(epoch)
         if (epoch/num_epochs) == 1:
@@ -54,7 +55,7 @@ def cross_validate():
     print('Mean of the accuracy:', (sum(acc_list)/len(acc_list)))     
     return acc_list, epoch_list
 
-def main(split, class_weights):
+def main(split):
     # create data folders if non-existent
     if not os.path.isdir(root + 'Pictures'):
         os.mkdir(root + 'Pictures')
@@ -72,14 +73,13 @@ def main(split, class_weights):
     else:    
         model = SimpleCNN()
         model = model.to(dev)
-    model, acc_val_list, acc_train_list, mcc_val_list, mcc_train_list, cm_train, cm_valid = train(model, 
-                                                    train_loader, validation_loader, num_epochs,
-                                                    learning_rate, class_weights, dev)
-    best_val_acc = max(acc_val_list)[0]
-    best_epoch = max(acc_val_list)[1]
-    create_plts(acc_val_list, acc_train_list, mcc_val_list, mcc_train_list, cm_train, cm_valid, split)
+    model, out_params = train(model, train_loader, validation_loader, 
+                              num_epochs, learning_rate, dev)
+    best_val_acc = min(out_params)[3]
+    best_epoch = min(out_params)[2]
+    create_plts(out_params, split)
     torch.save(model, root + 'model.pickle')
-    return best_val_acc, best_epoch
+    return best_val_acc, best_epoch, out_params
 
 def de_serializeInput(split):    
     all_features, info = loaddata('signalP4.npz', 'train_set.fasta')
@@ -169,37 +169,34 @@ def calcClassImbalance(info):
     return counts
 
 def calcMCCbatch (labels, predicted):
-    predicted, labels = predicted.to('cpu'), labels.to('cpu')
-    mcc = 0
+    predicted, labels = predicted.to('cpu').numpy(), labels.to('cpu').numpy()
+    predicted_batch = []
+    labels_batch = []
     cm = 0
-    for x in range(labels.size()[0]):
-        mcc += metrics.matthews_corrcoef(predicted[x], labels[x])
-        cm += confusion_matrix(labels[x], predicted[x],  [0, 1, 2, 3, 4, 5])
-    result = mcc/labels.size()[0]
-    return result,cm
+    for x in range(len(labels)):
+        predicted_batch.extend(predicted[x])
+        labels_batch.extend(labels[x])
+        cm += confusion_matrix(labels[x], predicted[x],  [0, 1, 2, 3, 4, 5])     
+    mcc = metrics.matthews_corrcoef(predicted_batch, labels_batch)
+    return mcc,cm
     
-def train(model, train_loader, validation_loader, num_epochs, learning_rate, class_weights, dev):
+def train(model, train_loader, validation_loader, num_epochs, learning_rate, dev):
     print('Starting to learn...')
-    loss_list = []
     total_step = len(train_loader)
-    acc_val_list = []
-    acc_train_list = []
-    mcc_val_list = []
-    mcc_train_list = []
-    printafterepoch = 5
+    out_params = []
     criterion = torch.nn.CrossEntropyLoss(weight = class_weights, ignore_index = -100, reduction = 'mean')
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     for epoch in range(num_epochs):
         mcc_train_sum =  []
+        loss_train_list = []
         cm_train = 0
         for i, (train, labels) in enumerate(train_loader):
             # Run the forward pass
             train, labels = train.to(dev), labels.to(dev)
             outputs = model(train.unsqueeze(3))
-            outputs, labels = outputs.squeeze_(), labels
+            outputs = outputs.squeeze_()
             loss = criterion(outputs, labels)
-            loss_list.append(loss.item())
-    
+            
             # Backprop and perform Adam optimisation
             optimizer.zero_grad()
             loss.backward()
@@ -213,33 +210,33 @@ def train(model, train_loader, validation_loader, num_epochs, learning_rate, cla
             if (epoch%printafterepoch) == 0:
                 mcc_train, cm = calcMCCbatch(labels, predicted)
                 cm_train += cm
-                mcc_train_sum.append(mcc_train)      
+                mcc_train_sum.append(mcc_train)
+                loss_train_list.append(loss.item())  
             # and print the results
         if (epoch%printafterepoch) == 0:
-            result = (correct / total)*100
+            acc_train = (correct / total)*100
+            loss_ave = sum(loss_train_list)/len(loss_train_list)
             mcc_ave = sum(mcc_train_sum)/len(mcc_train_sum)
             print('Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}, Accuracy: {:.2f}%, MCC: {:.2f}'
-                  .format(epoch+1, num_epochs, i + 1, total_step, loss.item(),
-                          result, mcc_ave))
-            acc, mcc_val, cm_valid = validate(validation_loader, model, dev)
-            acc_val_list.append((acc,epoch))
-            acc_train_list.append((result,epoch))
-            mcc_train_list.append(mcc_ave)
-            mcc_val_list.append(mcc_val)
+                  .format(epoch+1, num_epochs, i + 1, total_step, loss_ave,
+                          acc_train, mcc_ave))
+            acc_valid, mcc_val, loss_valid, cm_valid = validate(validation_loader, model, criterion, dev)
+            out_params.append((loss_valid, loss_ave, epoch, acc_valid, acc_train, mcc_ave, mcc_val, cm_train, cm_valid))
     # check overfitting
-    print('Best accurarcy:', max(acc_val_list)[0]  ,' at epoch:', max(acc_val_list)[1])
-    return model, acc_val_list, acc_train_list, mcc_val_list, mcc_train_list, cm_train, cm_valid
+    print('Best validation loss:', min(out_params)[0]  ,' at epoch:', min(out_params)[2])
+    return model, out_params
 
-def validate(validation_loader, model, dev):
-    model.eval()
+def validate(validation_loader, model, criterion, dev):
     with torch.no_grad():
         correct = 0
         total = 0
         mcc_sum = []
         cm_valid = 0
+        loss_list = []
         for validation, labels in validation_loader:
             validation, labels = validation.to(dev), labels.to(dev)
             outputs = model(validation.unsqueeze(3))
+            loss = criterion(outputs.squeeze_(), labels)
             _, predicted = torch.max(outputs.data, 1)
             labels, predicted = predicted.squeeze_(), labels   
             correct += (predicted == labels).sum().item()
@@ -248,28 +245,44 @@ def validate(validation_loader, model, dev):
             mcc, cm = calcMCCbatch(labels, predicted)
             cm_valid += cm 
             mcc_sum.append(mcc)
-        true_mcc = (sum(mcc_sum)/len(mcc_sum))
-        print('Test Accuracy of the model on the validation proteins is: {:.2f}%, MCC is: {:.2f}'.format(result,true_mcc))
-    return result, true_mcc, cm_valid
+            loss_list.append(loss.item())
+        true_mcc = sum(mcc_sum)/len(mcc_sum)
+        loss_ave = sum(loss_list)/len(loss_list)
+        print('Accuracy of the model on the validation proteins is: {:.2f}%, Loss:{:.3f} and MCC is: {:.2f}'.format(result,loss_ave,true_mcc))
+    return result, true_mcc, loss_ave, cm_valid
 
-def create_plts(acc_val_list, acc_train_list, mcc_val_list, mcc_train_list, cm_train, cm_valid, split):
-    c = ['I','M','O', 'S', 'T', 'L']
-    plt.plot([x[1] for x in acc_val_list], [x[0] for x in acc_val_list],  label='Accuracy on the validation data')
-    plt.plot([x[1] for x in acc_train_list], [x[0] for x in acc_train_list],  label='Accuracy on the train data')
+def create_plts(out_params, split):
+    #------------------------------Loss------------------------------
+    plt.plot([x[2] for x in out_params], [x[0] for x in out_params],  label='Loss of the validation data')
+    plt.plot([x[2] for x in out_params], [x[1] for x in out_params],  label='Loss of the train data')
+    plt.legend()
+    plt.title('Train vs validation loss of split ' + split)
+    plt.xlabel('Number of epochs')
+    plt.ylabel('Model loss') 
+    plt.savefig(root + 'Pictures\\loss_plot_lr_' + str(learning_rate) + '_epochs_' + str(num_epochs) + '_split_'+split+'.png')
+    plt.close()
+    #------------------------------Accuracy------------------------------
+    plt.plot([x[2] for x in out_params], [x[3] for x in out_params],  label='Accuracy on the validation data')
+    plt.plot([x[2] for x in out_params], [x[4] for x in out_params],  label='Accuracy on the train data')
     plt.legend()
     plt.title('Accuracy of split ' + split)
     plt.xlabel('Number of epochs')
     plt.ylabel('Model accuracy in %') 
     plt.savefig(root + 'Pictures\\acc_plot_lr_' + str(learning_rate) + '_epochs_' + str(num_epochs) + '_split_'+split+'.png')
     plt.close()
-    plt.plot([x[1] for x in acc_val_list], [x for x in mcc_val_list],  label='MCC of the validation data')
-    plt.plot([x[1] for x in acc_train_list], [x for x in mcc_train_list],  label='MCC of the train data')
+    #------------------------------MCC------------------------------
+    plt.plot([x[2] for x in out_params], [x[5] for x in out_params],  label='MCC of the validation data')
+    plt.plot([x[2] for x in out_params], [x[6] for x in out_params],  label='MCC of the train data')
     plt.legend()
     plt.title('MCC of split ' + split)
     plt.xlabel('Number of epochs')
     plt.ylabel('Model MCC')
     plt.savefig(root + 'Pictures\\mcc_plot_lr_' + str(learning_rate) + '_epochs_' + str(num_epochs) + '_split_'+split+'.png')
     plt.close()
+    #------------------------------Confusion matrix------------------------------
+    c = ['I','M','O', 'S', 'T', 'L']
+    last_entry = out_params[len(out_params)-1]
+    cm_valid, cm_train = last_entry[len(last_entry)-1] , last_entry[len(last_entry)-2]
     plot_confusion_matrix (cm_train, c, root, learning_rate, num_epochs, split, title = 'Confusion matrix trainset, without normalization')
     plot_confusion_matrix (cm_valid, c, root, learning_rate, num_epochs, split, title = 'Confusion matrix validationset, without normalization')
     plot_confusion_matrix (cm_train, c, root, learning_rate, num_epochs, split, normalize=True, title = 'Confusion matrix trainset, with normalization')
@@ -285,5 +298,5 @@ if __name__ == "__main__":
                 learning_rate = all_learning_rate[y]
                 main(split)
     else:
-        main(split, class_weights)
+        best_val_acc, best_epoch, out_params = main(split)
     print("Runtime: ", time.time() - timer)
