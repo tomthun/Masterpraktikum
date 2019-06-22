@@ -26,7 +26,7 @@ params = {'batch_size': 200,
 num_epochs = 41
 learning_rate = 6e-4
 split = '4' 
-weights = [0.3, 0.98, 0.82, 0.95, 0.99, 0.98]
+weights = [0.05, 0.95, 0.99, 0.98]
 dev = torch.device('cuda')
 #dev = torch.device('cpu')
 class_weights = torch.FloatTensor(weights).to(dev)
@@ -112,8 +112,10 @@ def loaddata (data_name , training_name):
     partition = train_data[0].split('|')[3]
     seq = train_data[1]
     sig = train_data[2]
-    sigbin = list(map(int,sig.replace('I','0').replace('M','1').replace('O','2')
-                .replace('S','3').replace('T','4').replace('L','5')))
+#    sigbin = list(map(int,sig.replace('I','0').replace('M','1').replace('O','2')
+#                .replace('S','3').replace('T','4').replace('L','5')))
+    sigbin = list(map(int,sig.replace('I','0').replace('M','0').replace('O','0')
+             .replace('S','1').replace('T','2').replace('L','3')))
     count = 3
     for x in range(int((len(train_data)-4)/3)):
         lenprot = 70
@@ -125,8 +127,10 @@ def loaddata (data_name , training_name):
             info[header] = [signalp, partition,seq,sig,sigbin,lenprot]
         seq = train_data[count+1]
         sig = train_data[count+2]
-        sigbin = list(map(int,sig.replace('I','0').replace('M','1').replace('O','2')
-            .replace('S','3').replace('T','4').replace('L','5')))
+#         sigbin = list(map(int,sig.replace('I','0').replace('M','1').replace('O','2')
+#             .replace('S','3').replace('T','4').replace('L','5')))
+        sigbin = list(map(int,sig.replace('I','0').replace('M','0').replace('O','0')
+             .replace('S','1').replace('T','2').replace('L','3')))
         header = train_data[count].split('|')[0].replace('>','')    
         signalp = train_data[count].split('|')[2]
         partition = train_data[count].split('|')[3]
@@ -176,7 +180,7 @@ def calcMCCbatch (labels, predicted):
     for x in range(len(labels)):
         predicted_batch.extend(predicted[x])
         labels_batch.extend(labels[x])
-        cm += confusion_matrix(labels[x], predicted[x],  [0, 1, 2, 3, 4, 5])     
+        cm += confusion_matrix(labels[x], predicted[x],  [0, 1, 2, 3]) #[0, 1, 2, 3, 4, 5])     
     mcc = metrics.matthews_corrcoef(predicted_batch, labels_batch)
     return mcc,cm
     
@@ -280,7 +284,7 @@ def create_plts(out_params, split):
     plt.savefig(root + 'Pictures\\mcc_plot_lr_' + str(learning_rate) + '_epochs_' + str(num_epochs) + '_split_'+split+'.png')
     plt.close()
     #------------------------------Confusion matrix------------------------------
-    c = ['I','M','O', 'S', 'T', 'L']
+    c = ['Others(non-Sp)', 'S', 'T', 'L'] #['I','M','O', 'S', 'T', 'L']
     last_entry = out_params[len(out_params)-1]
     cm_valid, cm_train = last_entry[len(last_entry)-1] , last_entry[len(last_entry)-2]
     plot_confusion_matrix (cm_train, c, root, learning_rate, num_epochs, split, title = 'Confusion matrix trainset, without normalization')
