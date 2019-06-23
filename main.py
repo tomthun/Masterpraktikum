@@ -68,17 +68,14 @@ def main(split):
     validation_dataset = CustomDataset(validation_data,validation_labels)
     train_loader = DataLoader(train_dataset, **params)
     validation_loader = DataLoader(validation_dataset, **params)
-    if cross_validation and os.path.isfile(root + 'model.pickle') and split != '0':
-        model = torch.load(root + 'model.pickle')
-    else:    
-        model = SimpleCNN()
-        model = model.to(dev)
+    model = SimpleCNN()
+    model = model.to(dev)
     model, out_params = train(model, train_loader, validation_loader, 
                               num_epochs, learning_rate, dev)
     best_val_acc = min(out_params)[3]
     best_epoch = min(out_params)[2]
     create_plts(out_params, split)
-    torch.save(model, root + 'model.pickle')
+    torch.save(model, root + 'model'+split+'.pickle')
     return best_val_acc, best_epoch, out_params
 
 def de_serializeInput(split):    
@@ -194,6 +191,8 @@ def train(model, train_loader, validation_loader, num_epochs, learning_rate, dev
         mcc_train_sum =  []
         loss_train_list = []
         cm_train = 0
+        correct = 0
+        total = 0 
         for i, (train, labels) in enumerate(train_loader):
             # Run the forward pass
             train, labels = train.to(dev), labels.to(dev)
@@ -206,17 +205,18 @@ def train(model, train_loader, validation_loader, num_epochs, learning_rate, dev
             loss.backward()
             optimizer.step()
     
-            # Track the accuracy, mcc and cm
-            total = labels.size(0)* labels.size(1)
-            _, predicted = torch.max(outputs.data, 1)
-            predicted = predicted.squeeze_()
-            correct = (predicted == labels).sum().item()           
-            if (epoch%printafterepoch) == 0:
+            # Track the accuracy, mcc and cm                    
+            if (epoch%printafterepoch) == 0: 
+                total += labels.size(0)* labels.size(1)
+                _, predicted = torch.max(outputs.data, 1)
+                predicted = predicted.squeeze_()
+                correct += (predicted == labels).sum().item()              
                 mcc_train, cm = calcMCCbatch(labels, predicted)
                 cm_train += cm
                 mcc_train_sum.append(mcc_train)
                 loss_train_list.append(loss.item())  
-            # and print the results
+                
+        # and print the results
         if (epoch%printafterepoch) == 0:
             acc_train = (correct / total)*100
             loss_ave = sum(loss_train_list)/len(loss_train_list)

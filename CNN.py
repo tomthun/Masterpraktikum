@@ -13,11 +13,9 @@ class SimpleCNN(nn.Module):
     def __init__(self):
         super(SimpleCNN, self).__init__()
         self.layer1 = nn.Sequential(
-            nn.Conv2d(1024, 4, kernel_size=(5,1),  padding = (2,0)),
-            nn.ReLU()) 
+            nn.Conv2d(1024, 4, kernel_size=(5,1),  padding = (2,0))) 
         self.layer2 = nn.Sequential(
-            nn.Conv2d(100, 4, kernel_size=(3,1),  padding=(1,0)),
-            nn.ReLU())
+            nn.Conv2d(100, 4, kernel_size=(3,1),  padding=(1,0)))
         self.fc1 = nn.Linear(1, 350)
         self.fc2 = nn.Linear(350, 6)
     
