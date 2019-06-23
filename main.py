@@ -23,7 +23,7 @@ root = 'C:\\Users\\Thomas\\Documents\\Uni_masters\\MasterPrak_Data\\'
 params = {'batch_size': 200,
           'shuffle': True,
           'num_workers': 0}
-num_epochs = 41
+num_epochs = 411
 learning_rate = 6e-4
 split = '4' 
 weights = [0.05, 0.95, 0.99, 0.98]
