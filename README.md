@@ -1,3 +1,3 @@
 # Masterpraktikum
-![alt text](https://github.com/adam-p/markdown-here/raw/master/src/common/images/icon48.png "Logo Title Text 1")
+![alt text](https://github.com/tomthun/Masterpraktikum/blob/master/Pictures/4Classes_601epochs_newCRFmodel/mcc_plot_lr_0.0005_epochs_601_split_4.png)
 Signalprotein prediction with elmo
