@@ -19,5 +19,7 @@ class CustomDataset(Dataset):
     def __getitem__(self,idx):
         X = torch.tensor(self.features[idx]).float().permute(1,0)
         y = torch.tensor(self.labels[idx]).long()
-        return X,y
-    
+        mask = (y != -100)
+        y[y == -100] = 0
+        return X,y,mask        
+        
