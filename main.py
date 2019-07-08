@@ -26,9 +26,9 @@ root = 'C:\\Users\\Thomas\\Documents\\Uni_masters\\MasterPrak_Data\\'
 params = {'batch_size': 200,
           'shuffle': True,
           'num_workers': 0}
-num_epochs = 601
+num_epochs = 5
 learning_rate = 5e-4
-split = '4' 
+splits = 5 
 weights = [0.05, 0.95, 0.99, 0.98]
 dev = torch.device('cuda')
 #dev = torch.device('cpu')
@@ -38,75 +38,121 @@ num_classes = 4
 #--------------- Cross Validation ---------------
 cross_validation = False
 
-#--------------- parameterize grid search here ---------------
+#--------------- Parameterize grid search here ---------------
 grid_search = False
 all_num_epochs = (50,100,150,200)
 all_learning_rate = (1e-2, 1e-3, 1e-4, 5e-4 ,1e-5)
 
-def cross_validate():
-    acc_list = [] 
-    epoch_list = []
-    print('Starting cross-validation...')
-    for splits in range(int(split)+1):
-       for x in range(len(all_num_epochs)):
-           num_epochs = all_num_epochs[x]
-           for y in range(len(all_learning_rate)):
-               learning_rate = all_learning_rate[y]
-               main(str(split),class_weights)
-    acc, epoch, out = main(str(splits), class_weights)
-    acc_list.append(acc)
-    epoch_list.append(epoch)
-    if (epoch/num_epochs) == 1:
-        print('No overfitting!')
-    else:
-        print('Overfitting after epoch:', epoch,'!')
-    print('Mean of the accuracy:', (sum(acc_list)/len(acc_list)))     
-    return acc_list, epoch_list
+#--------------- Benchmark ---------------
+benchmark = True
+#--------------- selected split to benchmark/validate upon -------------------
+selected_split = 4
 
-def main(split):
+def cross_validate():
+     print('to do')
+#    acc_list = [] 
+#    epoch_list = []
+#    print('Starting cross-validation...')
+#    for split in range(splits):
+#       for x in range(len(all_num_epochs)):
+#           num_epochs = all_num_epochs[x]
+#           for y in range(len(all_learning_rate)):
+#               learning_rate = all_learning_rate[y]
+#               main(str(split),class_weights)
+#    acc, epoch, out = main(str(split), class_weights)
+#    acc_list.append(acc)
+#    epoch_list.append(epoch)
+#    if (epoch/num_epochs) == 1:
+#        print('No overfitting!')
+#    else:
+#        print('Overfitting after epoch:', epoch,'!')
+#    print('Mean of the accuracy:', (sum(acc_list)/len(acc_list)))     
+#    return acc_list, epoch_list
+
+def main(split,benchmark):
     # create data folders if non-existent
     if not os.path.isdir(root + 'Pictures'):
         os.mkdir(root + 'Pictures')
     elif not os.path.isdir(root + 'pickled_files'):
         os.mkdir(root + 'pickled_files')
-    print('Validationset is:', split)
-    # train on the GPU or on the CPU, if a GPU is not available
-    train_data, train_labels, validation_data, validation_labels, info = de_serializeInput(split)
-    train_dataset = CustomDataset(train_data,train_labels)
-    validation_dataset = CustomDataset(validation_data,validation_labels)
-    train_loader = DataLoader(train_dataset, **params)
-    validation_loader = DataLoader(validation_dataset, **params)
-    model = SimpleCNN(num_classes)
-    model = model.to(dev)
-    model, out_params = train(model, train_loader, validation_loader, 
-                              num_epochs, learning_rate, dev)
-    best_val_acc = min(out_params)[3]
-    best_epoch = min(out_params)[2]
-    create_plts(out_params, split)
-    torch.save(model, root + 'model'+split+'.pickle')
-    return best_val_acc, best_epoch, out_params
+    if benchmark:
+        try:
+            model = torch.load(root + 'model.pickle')
+            print('Your existing model will be benchmarked')
+            bench_data, bench_labels = de_serializeBenchmark(split)
+            bench_dataset = CustomDataset(bench_data, bench_labels)
+            bench_loader = DataLoader(bench_dataset, **params)
+            result, true_mcc, loss_ave, cm_valid  = validate(bench_loader, model, dev)
+            print('Confusion matrix is:\n', cm_valid)
+        except:
+            print('No model found for benchmarking! Start a new run with benchmark = False!')
+    else:
+        print('Validationset is:', split)
+        # train on the GPU or on the CPU, if a GPU is not available
+        train_data, train_labels, validation_data, validation_labels, info = de_serializeInput(split)
+        train_dataset = CustomDataset(train_data,train_labels)
+        validation_dataset = CustomDataset(validation_data,validation_labels)
+        train_loader = DataLoader(train_dataset, **params)
+        validation_loader = DataLoader(validation_dataset, **params)
+        model = SimpleCNN(num_classes)
+        model = model.to(dev)
+        model, out_params = train(model, train_loader, validation_loader, 
+                                  num_epochs, learning_rate, dev)
+        best_val_acc = min(out_params)[3]
+        best_epoch = min(out_params)[2]
+        create_plts(out_params, split)
+        torch.save(model, root + 'model.pickle')
+        return best_val_acc, best_epoch, out_params
 
-def de_serializeInput(split):    
+def de_serializeInput(validation_split):    
     all_features, info = loaddata('signalP4.npz', 'train_set.fasta')
+    train_data,train_labels,validation_data,validation_labels = [],[],[],[]
     try:       
         print('Loading pickled files...')
-        train_data = pickle.load(open(root+"pickled_files\\train"+split+".pickle", "rb"))
-        validation_data = pickle.load(open(root+"pickled_files\\validation"+split+".pickle", "rb"))
-        train_labels = pickle.load(open(root+"pickled_files\\train_label"+split+".pickle", "rb"))
-        validation_labels = pickle.load(open(root+"pickled_files\\validation_label"+split+".pickle", "rb"))
+        for split in range(splits):
+            split_data = pickle.load(open(root+"pickled_files\\split_"+str(split)+"_data.pickle", "rb"))
+            split_labels = pickle.load(open(root+"pickled_files\\split_"+str(split)+"_labels.pickle", "rb"))
+            if split == validation_split:
+                validation_data,validation_labels = split_data, split_labels
+            else:
+                train_data.extend(split_data)
+                train_labels.extend(split_labels)
         print('Done!')
     except (OSError, IOError):     
         print('Pickled files not found!\nCreating new train/validation dataset...')
-        train_keys, validation_keys = selectTestTrainSplit(info,split)
-        train_data, train_labels = createDataVectors(info,all_features,train_keys)
-        validation_data, validation_labels = createDataVectors(info,all_features, validation_keys)
-        pickle.dump(train_data, open( root+"pickled_files\\train"+split+".pickle", "wb" ))
-        pickle.dump(validation_data, open( root+"pickled_files\\validation"+split+".pickle", "wb" ))
-        pickle.dump(train_labels, open( root+"pickled_files\\train_label"+split+".pickle", "wb" ))
-        pickle.dump(validation_labels, open( root+"pickled_files\\validation_label"+split+".pickle", "wb" ))
+        for split in range(splits):           
+            split_keys = selectTestTrainSplit(info,split)
+            split_data, split_labels = createDataVectors(info,all_features,split_keys)
+            pickle.dump(split_data, open( root+"pickled_files\\split_"+str(split)+"_data.pickle", "wb" ))
+            pickle.dump(split_labels, open( root+"pickled_files\\split_"+str(split)+"_labels.pickle", "wb" ))
+            if split == validation_split:
+                validation_data,validation_labels = split_data, split_labels
+            else:
+                train_data.extend(split_data)
+                train_labels.extend(split_labels)
         print('Saved and Done!')
     return train_data,train_labels,validation_data,validation_labels,info
-       
+
+def  de_serializeBenchmark(bench_split):
+    all_features, info = loaddata('signalP4.npz', 'benchmark_set.fasta')
+    bench_data, bench_labels = [],[]
+    try:       
+        print('Loading pickled benchmark files...')        
+        bench_data = pickle.load(open(root+"pickled_files\\bench_"+str(bench_split)+"_data.pickle", "rb"))
+        bench_labels  = pickle.load(open(root+"pickled_files\\bench_"+str(bench_split)+"_labels.pickle", "rb"))
+        print('Done!')
+    except (OSError, IOError):     
+        print('Pickled files not found!\nCreating new benchmark dataset...')
+        for split in range(splits):           
+            split_keys = selectTestTrainSplit(info,split)
+            split_data, split_labels = createDataVectors(info,all_features,split_keys)
+            pickle.dump(split_data, open( root+"pickled_files\\bench_"+str(split)+"_data.pickle", "wb" ))
+            pickle.dump(split_labels, open( root+"pickled_files\\bench_"+str(split)+"_labels.pickle", "wb" ))
+            if split == bench_split:
+                bench_data, bench_labels = split_data, split_labels
+        print('Saved and Done!')
+    return bench_data, bench_labels
+
 def loaddata (data_name , training_name):
     train_data = open(root+training_name, 'r') 
     train_data = train_data.read().split('\n')
@@ -163,9 +209,8 @@ def createDataVectors(info, all_features, keys):
     return data,label
 
 def selectTestTrainSplit(train_data,x):
-    split = [key  for (key, value) in train_data.items() if value[1] == x]
-    rest = set(list(train_data.keys()))-set(split)
-    return list(rest),split
+    split = [key  for (key, value) in train_data.items() if value[1] == str(x)]
+    return split 
 
 def calcClassImbalance(info):
     counts = [0,0,0,0,0,0]
@@ -236,13 +281,13 @@ def train(model, train_loader, validation_loader, num_epochs, learning_rate, dev
             print('Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}, Accuracy: {:.2f}%, MCC: {:.2f}'
                   .format(epoch+1, num_epochs, i + 1, total_step, loss_ave,
                           acc_train, mcc_ave))
-            acc_valid, mcc_val, loss_valid, cm_valid = validate(validation_loader, model, criterion, dev)
+            acc_valid, mcc_val, loss_valid, cm_valid = validate(validation_loader, model, dev, criterion = criterion)
             out_params.append((loss_valid, loss_ave, epoch, acc_valid, acc_train, mcc_val, mcc_ave , cm_train, cm_valid))
     # check overfitting
     print('Best validation loss:', min(out_params)[0]  ,' at epoch:', min(out_params)[2])
     return model, out_params
 
-def validate(validation_loader, model, criterion, dev):
+def validate(validation_loader, model, dev, criterion = None):
     with torch.no_grad():
         correct = 0
         total = 0
@@ -271,6 +316,7 @@ def validate(validation_loader, model, criterion, dev):
     return result, true_mcc, loss_ave, cm_valid
 
 def create_plts(out_params, split):
+    split = str(split)
     if cross_validation:
         print('todo')
     else:        
@@ -318,8 +364,9 @@ def create_plts(out_params, split):
         plot_confusion_matrix (cm_valid, c, root, learning_rate, num_epochs, split, normalize=True, title = 'Confusion matrix validationset, with normalization')
 
 if __name__ == "__main__":
-    if cross_validation == True:
-        acc_list, epoch_list = cross_validate()     
+    if cross_validation:
+        acc_list, epoch_list = cross_validate() 
     else:
-        best_val_acc, best_epoch, out_params = main(split)
+        main(selected_split, benchmark)
+        
     print("Runtime: ", time.time() - timer)
