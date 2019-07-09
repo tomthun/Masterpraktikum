@@ -19,55 +19,53 @@ from sklearn.metrics import confusion_matrix
 from ConfusionMatrix import plot_confusion_matrix
 import torch as nn
 timer = time.time()
-
+splits = 5 
+num_classes = 4
 #--------------- parameterize hyperparameters ---------------
 nn.manual_seed(10)
 root = 'C:\\Users\\Thomas\\Documents\\Uni_masters\\MasterPrak_Data\\'
 params = {'batch_size': 200,
           'shuffle': True,
           'num_workers': 0}
-num_epochs = 5
+num_epochs = 121
 learning_rate = 5e-4
-splits = 5 
 weights = [0.05, 0.95, 0.99, 0.98]
 dev = torch.device('cuda')
 #dev = torch.device('cpu')
 class_weights = torch.FloatTensor(weights).to(dev)
-printafterepoch = 100
-num_classes = 4
+printafterepoch = 15
 #--------------- Cross Validation ---------------
-cross_validation = False
-
+cross_validation = True
 #--------------- Parameterize grid search here ---------------
-grid_search = False
+gridsearch = False
 all_num_epochs = (50,100,150,200)
 all_learning_rate = (1e-2, 1e-3, 1e-4, 5e-4 ,1e-5)
-
 #--------------- Benchmark ---------------
 benchmark = True
-#--------------- selected split to benchmark/validate upon -------------------
-selected_split = 4
+normal_run = False
+#-------------Selected split to benchmark/validate upon (0-4)-----------------
+selected_split = 0
+benchmark_split = 1
 
 def cross_validate():
-     print('to do')
-#    acc_list = [] 
-#    epoch_list = []
-#    print('Starting cross-validation...')
-#    for split in range(splits):
-#       for x in range(len(all_num_epochs)):
-#           num_epochs = all_num_epochs[x]
-#           for y in range(len(all_learning_rate)):
-#               learning_rate = all_learning_rate[y]
-#               main(str(split),class_weights)
-#    acc, epoch, out = main(str(split), class_weights)
-#    acc_list.append(acc)
-#    epoch_list.append(epoch)
-#    if (epoch/num_epochs) == 1:
-#        print('No overfitting!')
-#    else:
-#        print('Overfitting after epoch:', epoch,'!')
-#    print('Mean of the accuracy:', (sum(acc_list)/len(acc_list)))     
-#    return acc_list, epoch_list
+    acc_list = [] 
+    epoch_list = []
+    params_list = []
+    print('Starting cross-validation...')
+    for split in range(splits):
+        if split == benchmark_split:
+            print('Skipping benchmark split...')
+            continue
+        acc, epoch, out = main(split, False)
+        acc_list.append(acc)
+        epoch_list.append(epoch)
+        params_list.append(out)
+        if (epoch/num_epochs) == 1:
+            print('No overfitting!')
+        else:
+            print('Overfitting after epoch:', epoch,'!')
+    print('Mean of the accuracy:', (sum(acc_list)/len(acc_list)))     
+    return acc_list, epoch_list, params_list
 
 def main(split,benchmark):
     # create data folders if non-existent
@@ -76,6 +74,7 @@ def main(split,benchmark):
     elif not os.path.isdir(root + 'pickled_files'):
         os.mkdir(root + 'pickled_files')
     if benchmark:
+        print('Validationset is:', split,'Benchmarkset is:', benchmark_split)
         try:
             model = torch.load(root + 'model.pickle')
             print('Your existing model will be benchmarked')
@@ -87,7 +86,7 @@ def main(split,benchmark):
         except:
             print('No model found for benchmarking! Start a new run with benchmark = False!')
     else:
-        print('Validationset is:', split)
+        print('Validationset is:', split, 'Benchmarkset is:', benchmark_split)
         # train on the GPU or on the CPU, if a GPU is not available
         train_data, train_labels, validation_data, validation_labels, info = de_serializeInput(split)
         train_dataset = CustomDataset(train_data,train_labels)
@@ -103,7 +102,9 @@ def main(split,benchmark):
         create_plts(out_params, split)
         torch.save(model, root + 'model.pickle')
         return best_val_acc, best_epoch, out_params
-
+# =============================================================================
+# Load / preprocess data
+# =============================================================================
 def de_serializeInput(validation_split):    
     all_features, info = loaddata('signalP4.npz', 'train_set.fasta')
     train_data,train_labels,validation_data,validation_labels = [],[],[],[]
@@ -112,7 +113,9 @@ def de_serializeInput(validation_split):
         for split in range(splits):
             split_data = pickle.load(open(root+"pickled_files\\split_"+str(split)+"_data.pickle", "rb"))
             split_labels = pickle.load(open(root+"pickled_files\\split_"+str(split)+"_labels.pickle", "rb"))
-            if split == validation_split:
+            if split == benchmark_split:
+                continue
+            elif split == validation_split:
                 validation_data,validation_labels = split_data, split_labels
             else:
                 train_data.extend(split_data)
@@ -125,7 +128,9 @@ def de_serializeInput(validation_split):
             split_data, split_labels = createDataVectors(info,all_features,split_keys)
             pickle.dump(split_data, open( root+"pickled_files\\split_"+str(split)+"_data.pickle", "wb" ))
             pickle.dump(split_labels, open( root+"pickled_files\\split_"+str(split)+"_labels.pickle", "wb" ))
-            if split == validation_split:
+            if split == benchmark_split:
+                continue
+            elif split == validation_split:
                 validation_data,validation_labels = split_data, split_labels
             else:
                 train_data.extend(split_data)
@@ -173,7 +178,7 @@ def loaddata (data_name , training_name):
         if (len(seq) == lenprot):
             info[header] = [signalp, partition,seq,sig,sigbin,lenprot]
         else:
-            #remove # to include shorter proteins
+            # padding of proteins < 70 aminoacids
             lenprot = len(seq)
             [sigbin.append(-100) for x in range (70 - lenprot)]
             info[header] = [signalp, partition,seq,sig,sigbin,lenprot]
@@ -187,7 +192,7 @@ def loaddata (data_name , training_name):
         signalp = train_data[count].split('|')[2]
         partition = train_data[count].split('|')[3]
         count += 3
-    # remove invalid Proteinidentifiers
+    # remove invalid Proteinidentifiers (which changed over time)
     for e in (set(list(info.keys()))-set(tmp.files)):
         info.pop(e)     
     return tmp, info
@@ -210,9 +215,12 @@ def createDataVectors(info, all_features, keys):
 
 def selectTestTrainSplit(train_data,x):
     split = [key  for (key, value) in train_data.items() if value[1] == str(x)]
-    return split 
-
+    return split
+# =============================================================================
+# Functions for training/validation
+# =============================================================================
 def calcClassImbalance(info):
+#    calculate class imbalance of the dataset NOT USED AT THE MOMENT
     counts = [0,0,0,0,0,0]
     for x in info:
         classes = info[x][3]
@@ -225,6 +233,7 @@ def calcClassImbalance(info):
     return counts
 
 def calcMCCbatch (labels, predicted):
+#   calculate MCC over given batches of an epoch in training/validation 
     predicted, labels = predicted.to('cpu').numpy(), labels.to('cpu').numpy()
     predicted_batch = []
     labels_batch = []
@@ -314,7 +323,9 @@ def validate(validation_loader, model, dev, criterion = None):
         loss_ave = sum(loss_list)/len(loss_list)
         print('Accuracy of the model on the validation proteins is: {:.2f}%, Loss:{:.3f} and MCC is: {:.2f}'.format(result,loss_ave,true_mcc))
     return result, true_mcc, loss_ave, cm_valid
-
+# =============================================================================
+# Functions to create plots
+# =============================================================================
 def create_plts(out_params, split):
     split = str(split)
     if cross_validation:
@@ -364,9 +375,20 @@ def create_plts(out_params, split):
         plot_confusion_matrix (cm_valid, c, root, learning_rate, num_epochs, split, normalize=True, title = 'Confusion matrix validationset, with normalization')
 
 if __name__ == "__main__":
+    if selected_split == benchmark_split and normal_run and benchmark:
+        print('Benchmark and validation split cannot be the same', 
+             'when doing a normal run with benchmarking because of biased evaluation.')
+        exit()
     if cross_validation:
-        acc_list, epoch_list = cross_validate() 
-    else:
+        acc_list, epoch_list, out = cross_validate()    
+    if gridsearch:     
+        cross_valid_params = []
+        for y in range(len(all_learning_rate)):
+            learning_rate = all_learning_rate[y]
+            acc, epoch, out = cross_validate()
+            cross_valid_params.append((acc, epoch, out))
+    if normal_run:
+        acc, epoch, out = main(selected_split, False)
+    if benchmark:
         main(selected_split, benchmark)
-        
     print("Runtime: ", time.time() - timer)
