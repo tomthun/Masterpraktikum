@@ -7,7 +7,6 @@ Created on Fri May 24 11:06:12 2019
 import torch
 from torch.utils.data import Dataset
 
-
 class CustomDataset(Dataset):
     def __init__(self, featuresdata, labels):
         self.features = featuresdata

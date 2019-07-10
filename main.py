@@ -4,20 +4,20 @@ Created on Sun Jun  2 18:36:46 2019
 
 @author: Thomas
 """
-from scipy.interpolate import make_interp_spline
+import os
+os.chdir('C:\\Users\\Thomas\\Documents\\Uni_masters\\Masterpraktikum')
 from CustomDataset import CustomDataset
 from CNN import SimpleCNN
 import numpy as np
 import pickle
 import torch
 from torch.utils.data import DataLoader
-import os
 import time
-import matplotlib.pyplot as plt
 import sklearn.metrics as metrics
 from sklearn.metrics import confusion_matrix
-from ConfusionMatrix import plot_confusion_matrix
+from CreatePlots import create_plts
 import torch as nn
+
 timer = time.time()
 splits = 5 
 num_classes = 4
@@ -35,7 +35,7 @@ dev = torch.device('cuda')
 class_weights = torch.FloatTensor(weights).to(dev)
 printafterepoch = 15
 #--------------- Cross Validation ---------------
-cross_validation = True
+cross_validation = False
 #--------------- Parameterize grid search here ---------------
 gridsearch = False
 all_num_epochs = (50,100,150,200)
@@ -43,29 +43,24 @@ all_learning_rate = (1e-2, 1e-3, 1e-4, 5e-4 ,1e-5)
 #--------------- Benchmark ---------------
 benchmark = True
 normal_run = False
-#-------------Selected split to benchmark/validate upon (0-4)-----------------
+#---Selected split to benchmark/validate upon (0-4, !must not be the same!)---
 selected_split = 0
 benchmark_split = 1
-
+# =============================================================================
+# Main functions
+# =============================================================================
 def cross_validate():
-    acc_list = [] 
-    epoch_list = []
+    # do crossvalidation
     params_list = []
     print('Starting cross-validation...')
     for split in range(splits):
         if split == benchmark_split:
             print('Skipping benchmark split...')
             continue
-        acc, epoch, out = main(split, False)
-        acc_list.append(acc)
-        epoch_list.append(epoch)
+        out = main(split, False)
         params_list.append(out)
-        if (epoch/num_epochs) == 1:
-            print('No overfitting!')
-        else:
-            print('Overfitting after epoch:', epoch,'!')
-    print('Mean of the accuracy:', (sum(acc_list)/len(acc_list)))     
-    return acc_list, epoch_list, params_list
+    create_plts(params_list, cross_validation, False, split, root, learning_rate, num_epochs)  
+    return params_list
 
 def main(split,benchmark):
     # create data folders if non-existent
@@ -74,15 +69,16 @@ def main(split,benchmark):
     elif not os.path.isdir(root + 'pickled_files'):
         os.mkdir(root + 'pickled_files')
     if benchmark:
-        print('Validationset is:', split,'Benchmarkset is:', benchmark_split)
+        print('Benchmarkset is:', benchmark_split)
         try:
             model = torch.load(root + 'model.pickle')
             print('Your existing model will be benchmarked')
             bench_data, bench_labels = de_serializeBenchmark(split)
             bench_dataset = CustomDataset(bench_data, bench_labels)
             bench_loader = DataLoader(bench_dataset, **params)
-            result, true_mcc, loss_ave, cm_valid  = validate(bench_loader, model, dev)
-            print('Confusion matrix is:\n', cm_valid)
+            result, true_mcc, loss_ave, cm  = validate(bench_loader, model, dev)
+            print('Confusion matrix is:\n', cm)
+            create_plts(cm, cross_validation, benchmark, benchmark_split, root, learning_rate, num_epochs)
         except:
             print('No model found for benchmarking! Start a new run with benchmark = False!')
     else:
@@ -97,11 +93,10 @@ def main(split,benchmark):
         model = model.to(dev)
         model, out_params = train(model, train_loader, validation_loader, 
                                   num_epochs, learning_rate, dev)
-        best_val_acc = min(out_params)[3]
-        best_epoch = min(out_params)[2]
-        create_plts(out_params, split)
+        if normal_run and not cross_validation and not gridsearch:
+            create_plts(out_params, cross_validation, benchmark ,split, root, learning_rate, num_epochs)
         torch.save(model, root + 'model.pickle')
-        return best_val_acc, best_epoch, out_params
+        return out_params
 # =============================================================================
 # Load / preprocess data
 # =============================================================================
@@ -324,71 +319,23 @@ def validate(validation_loader, model, dev, criterion = None):
         print('Accuracy of the model on the validation proteins is: {:.2f}%, Loss:{:.3f} and MCC is: {:.2f}'.format(result,loss_ave,true_mcc))
     return result, true_mcc, loss_ave, cm_valid
 # =============================================================================
-# Functions to create plots
+# Execute when running script
 # =============================================================================
-def create_plts(out_params, split):
-    split = str(split)
-    if cross_validation:
-        print('todo')
-    else:        
-        #------------------------------Loss------------------------------
-        loss_val, loss_train, epochs, acc_val, acc_train, mcc_val, mcc_train = (np.array([x[0] for x in out_params]),
-        np.array([x[1] for x in out_params]), np.array([x[2] for x in out_params]), np.array([x[3] for x in out_params]),
-        np.array([x[4] for x in out_params]), np.array([x[5] for x in out_params]), np.array([x[6] for x in out_params]))
-        x = np.linspace(epochs.min(),epochs.max(),500)
-        loss_val, loss_train, acc_val, acc_train, mcc_val, mcc_train = (make_interp_spline(epochs, loss_val, k=3), make_interp_spline(epochs, loss_train, k=3),
-        make_interp_spline(epochs, acc_val, k=3), make_interp_spline(epochs, acc_train, k=3),
-        make_interp_spline(epochs, mcc_val, k=3), make_interp_spline(epochs, mcc_train, k=3))
-        plt.plot(x, loss_val(x),  label='Loss of the validation data')
-        plt.plot(x, loss_train(x),  label='Loss of the train data')
-        plt.legend()
-        plt.title('Train vs validation loss of split ' + split)
-        plt.xlabel('Number of epochs')
-        plt.ylabel('Model loss') 
-        plt.savefig(root + 'Pictures\\loss_plot_lr_' + str(learning_rate) + '_epochs_' + str(num_epochs) + '_split_'+split+'.png')
-        plt.close()
-        #------------------------------Accuracy------------------------------
-        plt.plot(x, acc_val(x),  label='Accuracy on the validation data')
-        plt.plot(x, acc_train(x),  label='Accuracy on the train data')
-        plt.legend()
-        plt.title('Accuracy of split ' + split)
-        plt.xlabel('Number of epochs')
-        plt.ylabel('Model accuracy in %') 
-        plt.savefig(root + 'Pictures\\acc_plot_lr_' + str(learning_rate) + '_epochs_' + str(num_epochs) + '_split_'+split+'.png')
-        plt.close()
-        #------------------------------MCC------------------------------
-        plt.plot(x, mcc_val(x),  label='MCC of the validation data')
-        plt.plot(x, mcc_train(x),  label='MCC of the train data')
-        plt.legend()
-        plt.title('MCC of split ' + split)
-        plt.xlabel('Number of epochs')
-        plt.ylabel('Model MCC')
-        plt.savefig(root + 'Pictures\\mcc_plot_lr_' + str(learning_rate) + '_epochs_' + str(num_epochs) + '_split_'+split+'.png')
-        plt.close()
-        #------------------------------Confusion matrix------------------------------
-        c = ['Others(non-Sp)', 'S', 'T', 'L'] #['I','M','O', 'S', 'T', 'L']
-        last_entry = out_params[len(out_params)-1]
-        cm_valid, cm_train = last_entry[len(last_entry)-1] , last_entry[len(last_entry)-2]
-        plot_confusion_matrix (cm_train, c, root, learning_rate, num_epochs, split, title = 'Confusion matrix trainset, without normalization')
-        plot_confusion_matrix (cm_valid, c, root, learning_rate, num_epochs, split, title = 'Confusion matrix validationset, without normalization')
-        plot_confusion_matrix (cm_train, c, root, learning_rate, num_epochs, split, normalize=True, title = 'Confusion matrix trainset, with normalization')
-        plot_confusion_matrix (cm_valid, c, root, learning_rate, num_epochs, split, normalize=True, title = 'Confusion matrix validationset, with normalization')
-
 if __name__ == "__main__":
-    if selected_split == benchmark_split and normal_run and benchmark:
-        print('Benchmark and validation split cannot be the same', 
-             'when doing a normal run with benchmarking because of biased evaluation.')
-        exit()
-    if cross_validation:
-        acc_list, epoch_list, out = cross_validate()    
-    if gridsearch:     
+    if selected_split == benchmark_split and benchmark:
+        try: raise SystemExit
+        except: print('Benchmark and validation split cannot be the same when doing a normal run with benchmarking because of continous biased evaluation.')
+    if cross_validation and not normal_run:
+        out = cross_validate() 
+    if gridsearch :     
         cross_valid_params = []
         for y in range(len(all_learning_rate)):
             learning_rate = all_learning_rate[y]
-            acc, epoch, out = cross_validate()
-            cross_valid_params.append((acc, epoch, out))
+            out = cross_validate()
+            cross_valid_params.append(out)
     if normal_run:
-        acc, epoch, out = main(selected_split, False)
+        cross_validation, gridsearch = False, False
+        out = main(selected_split, False)
     if benchmark:
-        main(selected_split, benchmark)
+        main(benchmark_split, benchmark)
     print("Runtime: ", time.time() - timer)
