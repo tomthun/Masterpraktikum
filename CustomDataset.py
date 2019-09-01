@@ -8,9 +8,10 @@ import torch
 from torch.utils.data import Dataset
 
 class CustomDataset(Dataset):
-    def __init__(self, featuresdata, labels):
+    def __init__(self, featuresdata, labels, orga):
         self.features = featuresdata
         self.labels = labels
+        self.orga = orga
         
     def __len__(self):
         return len(self.features)   
@@ -20,5 +21,6 @@ class CustomDataset(Dataset):
         y = torch.tensor(self.labels[idx]).long()
         mask = (y != -100)
         y[y == -100] = 0
-        return X,y,mask        
+        organism = self.orga[idx]
+        return X,y,mask,organism
         

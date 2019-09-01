@@ -27,13 +27,13 @@ root = 'C:\\Users\\Thomas\\Documents\\Uni_masters\\MasterPrak_Data\\'
 params = {'batch_size': 200,
           'shuffle': True,
           'num_workers': 0}
-num_epochs = 121
+num_epochs = 41
 learning_rate = 5e-4
 weights = [0.05, 0.95, 0.99, 0.98]
 dev = torch.device('cuda')
 #dev = torch.device('cpu')
 class_weights = torch.FloatTensor(weights).to(dev)
-printafterepoch = 15
+printafterepoch = 5
 #--------------- Cross Validation ---------------
 cross_validation = False
 #--------------- Parameterize grid search here ---------------
@@ -45,7 +45,7 @@ benchmark = True
 normal_run = False
 #---Selected split to benchmark/validate upon (0-4, !must not be the same!)---
 selected_split = 0
-benchmark_split = 1
+benchmark_split = 4
 # =============================================================================
 # Main functions
 # =============================================================================
@@ -73,12 +73,12 @@ def main(split,benchmark):
         try:
             model = torch.load(root + 'model.pickle')
             print('Your existing model will be benchmarked')
-            bench_data, bench_labels = de_serializeBenchmark(split)
-            bench_dataset = CustomDataset(bench_data, bench_labels)
+            bench_data, bench_labels, bench_orga = de_serializeBenchmark(benchmark_split)
+            bench_dataset = CustomDataset(bench_data, bench_labels, bench_orga)
             bench_loader = DataLoader(bench_dataset, **params)
-            result, true_mcc, loss_ave, cm  = validate(bench_loader, model, dev)
+            result, true_mcc, loss_ave, cm , mcc_orga, cm_orga = validate(bench_loader, model, dev)
             print('Confusion matrix is:\n', cm)
-            create_plts(cm, cross_validation, benchmark, benchmark_split, root, learning_rate, num_epochs)
+            create_plts(cm, cross_validation, benchmark, benchmark_split, root, learning_rate, num_epochs, mcc_orga = mcc_orga, cm_orga = cm_orga)
         except:
             print('No model found for benchmarking! Start a new run with benchmark = False!')
     else:
@@ -108,6 +108,7 @@ def de_serializeInput(validation_split):
         for split in range(splits):
             split_data = pickle.load(open(root+"pickled_files\\split_"+str(split)+"_data.pickle", "rb"))
             split_labels = pickle.load(open(root+"pickled_files\\split_"+str(split)+"_labels.pickle", "rb"))
+            split_orga  = pickle.load(open(root+"pickled_files\\split_"+str(split)+"_orga.pickle", "rb"))
             if split == benchmark_split:
                 continue
             elif split == validation_split:
@@ -123,6 +124,7 @@ def de_serializeInput(validation_split):
             split_data, split_labels = createDataVectors(info,all_features,split_keys)
             pickle.dump(split_data, open( root+"pickled_files\\split_"+str(split)+"_data.pickle", "wb" ))
             pickle.dump(split_labels, open( root+"pickled_files\\split_"+str(split)+"_labels.pickle", "wb" ))
+            pickle.dump(split_orga, open( root+"pickled_files\\split_"+str(split)+"_orga.pickle", "wb" ))
             if split == benchmark_split:
                 continue
             elif split == validation_split:
@@ -140,18 +142,20 @@ def  de_serializeBenchmark(bench_split):
         print('Loading pickled benchmark files...')        
         bench_data = pickle.load(open(root+"pickled_files\\bench_"+str(bench_split)+"_data.pickle", "rb"))
         bench_labels  = pickle.load(open(root+"pickled_files\\bench_"+str(bench_split)+"_labels.pickle", "rb"))
+        bench_orga  = pickle.load(open(root+"pickled_files\\bench_"+str(bench_split)+"_orga.pickle", "rb"))
         print('Done!')
     except (OSError, IOError):     
         print('Pickled files not found!\nCreating new benchmark dataset...')
         for split in range(splits):           
             split_keys = selectTestTrainSplit(info,split)
-            split_data, split_labels = createDataVectors(info,all_features,split_keys)
+            split_data, split_labels, split_orga = createDataVectors(info,all_features,split_keys)
             pickle.dump(split_data, open( root+"pickled_files\\bench_"+str(split)+"_data.pickle", "wb" ))
             pickle.dump(split_labels, open( root+"pickled_files\\bench_"+str(split)+"_labels.pickle", "wb" ))
+            pickle.dump(split_orga, open( root+"pickled_files\\bench_"+str(split)+"_orga.pickle", "wb" ))
             if split == bench_split:
-                bench_data, bench_labels = split_data, split_labels
+                bench_data, bench_labels, bench_orga = split_data, split_labels, split_orga
         print('Saved and Done!')
-    return bench_data, bench_labels
+    return bench_data, bench_labels, bench_orga
 
 def loaddata (data_name , training_name):
     train_data = open(root+training_name, 'r') 
@@ -159,6 +163,7 @@ def loaddata (data_name , training_name):
     tmp = np.load(root+data_name)
     info = {}
     header = train_data[0].split('|')[0].replace('>','')
+    org = train_data[0].split('|')[1]
     signalp = train_data[0].split('|')[2]
     partition = train_data[0].split('|')[3]
     seq = train_data[1]
@@ -171,12 +176,12 @@ def loaddata (data_name , training_name):
     for x in range(int((len(train_data)-4)/3)):
         lenprot = 70
         if (len(seq) == lenprot):
-            info[header] = [signalp, partition,seq,sig,sigbin,lenprot]
+            info[header] = [signalp, partition,seq,sig,sigbin,lenprot,org]
         else:
             # padding of proteins < 70 aminoacids
             lenprot = len(seq)
             [sigbin.append(-100) for x in range (70 - lenprot)]
-            info[header] = [signalp, partition,seq,sig,sigbin,lenprot]
+            info[header] = [signalp, partition,seq,sig,sigbin,lenprot,org]
         seq = train_data[count+1]
         sig = train_data[count+2]
 #         sigbin = list(map(int,sig.replace('I','0').replace('M','1').replace('O','2')
@@ -184,6 +189,7 @@ def loaddata (data_name , training_name):
         sigbin = list(map(int,sig.replace('I','0').replace('M','0').replace('O','0')
              .replace('S','1').replace('T','2').replace('L','3')))
         header = train_data[count].split('|')[0].replace('>','')    
+        org = train_data[count].split('|')[1]
         signalp = train_data[count].split('|')[2]
         partition = train_data[count].split('|')[3]
         count += 3
@@ -195,18 +201,19 @@ def loaddata (data_name , training_name):
 def createDataVectors(info, all_features, keys):
     data = []
     label = []
+    orga = []
     for key in keys:
         lenprot = info[key][5]
         label.append(info[key][4])
+        orga.append(info[key][6])
         if lenprot < 70:
-#           remove continue and # to include shorter proteins          
             feat = all_features[key][:lenprot]
             result = np.zeros([70,1024])
             result[:feat.shape[0], :feat.shape[1]] = feat
             data.append(result)
         else:
             data.append(all_features[key][:70])
-    return data,label
+    return data, label, orga
 
 def selectTestTrainSplit(train_data,x):
     split = [key  for (key, value) in train_data.items() if value[1] == str(x)]
@@ -227,32 +234,57 @@ def calcClassImbalance(info):
         counts[5] = counts[5] + classes.count('L')
     return counts
 
-def calcMCCbatch (labels, predicted):
-#   calculate MCC over given batches of an epoch in training/validation 
+def orgaBatch (labels, predicted, orga, predicted_batch, labels_batch ):
+    #to do: apply in validate
     predicted, labels = predicted.to('cpu').numpy(), labels.to('cpu').numpy()
-    predicted_batch = []
-    labels_batch = []
-    cm = 0
     for x in range(len(labels)):
-        predicted_batch.extend(predicted[x])
-        labels_batch.extend(labels[x])
-        cm += confusion_matrix(labels[x], predicted[x],  [0, 1, 2, 3]) #[0, 1, 2, 3, 4, 5])     
-    mcc = metrics.matthews_corrcoef(predicted_batch, labels_batch)
+        if orga[x] == 'ARCHAEA':
+            predicted_batch[0].extend(predicted[x])
+            labels_batch[0].extend(labels[x])
+        elif orga[x] == 'EUKARYA':            
+            predicted_batch[1].extend(predicted[x])
+            labels_batch[1].extend(labels[x])
+        elif orga[x] == 'NEGATIVE':
+            predicted_batch[2].extend(predicted[x])
+            labels_batch[2].extend(labels[x])
+        elif orga[x] == 'POSITIVE':
+            predicted_batch[3].extend(predicted[x])
+            labels_batch[3].extend(labels[x])
+    return predicted_batch, labels_batch
+
+def calcMCCbatch (labels_batch, predicted_batch):
+#   calculate MCC over given batches of an epoch in training/validation 
+#   [0]:Archea, [1]:Eukaryot, [2]:Gram negative, [3]:Gram positive  
+    x = sum(predicted_batch, [])
+    y = sum(labels_batch,[])
+    mcc = metrics.matthews_corrcoef(x, y)
+    cm = confusion_matrix(x, y,  [0, 1, 2, 3]) #[0, 1, 2, 3, 4, 5])    
     return mcc,cm
+
+def calcMCCorga(labels_batch, predicted_batch):
+#   calculate MCC over given batches of an epoch in training/validation 
+#   [0]:Archea, [1]:Eukaryot, [2]:Gram negative, [3]:Gram positive 
+    mcc_list, cm_list = [],[]
+    for x in range(len(labels_batch)):   
+        mcc = metrics.matthews_corrcoef(predicted_batch[x], labels_batch[x])
+        cm = confusion_matrix(predicted_batch[x], labels_batch[x],  [0, 1, 2, 3]) #[0, 1, 2, 3, 4, 5])  
+        mcc_list.append(mcc)
+        cm_list.append(cm)
+    return mcc_list, cm_list
 
 def train(model, train_loader, validation_loader, num_epochs, learning_rate, dev):
     print('Starting to learn...')
     total_step = len(train_loader)
+    predicted_batch = [[],[],[],[]] # [0]:Archea, [1]:Eukaryot, [2]:Gram negative, [3]:Gram positive
+    labels_batch= [[],[],[],[]]
     out_params = []
     criterion = torch.nn.CrossEntropyLoss(weight = class_weights, ignore_index = -100, reduction = 'mean')
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     for epoch in range(num_epochs):
-        mcc_train_sum =  []
         loss_train_list = []
-        cm_train = 0
         correct = 0
         total = 0 
-        for i, (train, labels, mask) in enumerate(train_loader):
+        for i, (train, labels, mask, orga) in train_loader:
             # Run the forward pass
             train, labels, mask = train.to(dev), labels.to(dev), mask.to(dev)
             outputs = model(train.unsqueeze(3))
@@ -271,53 +303,53 @@ def train(model, train_loader, validation_loader, num_epochs, learning_rate, dev
                 #_, predicted = torch.max(outputs.data, 1)                
                 #predicted = predicted.squeeze_()
                 predicted = nn.Tensor(model.crf.decode(outputs)).cuda()
-                correct += (predicted == labels.float()).sum().item()              
-                mcc_train, cm = calcMCCbatch(labels, predicted)
-                cm_train += cm
-                mcc_train_sum.append(mcc_train)
+                correct += (predicted == labels.float()).sum().item()     
+                predicted_batch, labels_batch = orgaBatch(labels, predicted, orga, predicted_batch, labels_batch)
                 loss_train_list.append(loss.item())  
                 
         # and print the results
-        if (epoch%printafterepoch) == 0:
+        if (epoch%printafterepoch) == 0:            
+            mcc_train, cm_train = calcMCCbatch(labels, predicted)
             acc_train = (correct / total)*100
             loss_ave = sum(loss_train_list)/len(loss_train_list)
-            mcc_ave = sum(mcc_train_sum)/len(mcc_train_sum)
             print('Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}, Accuracy: {:.2f}%, MCC: {:.2f}'
                   .format(epoch+1, num_epochs, i + 1, total_step, loss_ave,
-                          acc_train, mcc_ave))
-            acc_valid, mcc_val, loss_valid, cm_valid = validate(validation_loader, model, dev, criterion = criterion)
-            out_params.append((loss_valid, loss_ave, epoch, acc_valid, acc_train, mcc_val, mcc_ave , cm_train, cm_valid))
+                          acc_train, mcc_train))
+            acc_valid, mcc_valid, loss_valid, cm_valid, mcc_orga, cm_orga= validate(validation_loader, model, dev, criterion = criterion)
+            out_params.append((loss_valid, loss_ave, epoch, acc_valid, acc_train, mcc_valid, mcc_train , mcc_orga, cm_orga, cm_train, cm_valid, ))
     # check overfitting
     print('Best validation loss:', min(out_params)[0]  ,' at epoch:', min(out_params)[2])
     return model, out_params
 
 def validate(validation_loader, model, dev, criterion = None):
-    with torch.no_grad():
+    with torch.no_grad():   
         correct = 0
         total = 0
-        mcc_sum = []
-        cm_valid = 0
+        predicted_batch = [[],[],[],[]] # [0]:Archea, [1]:Eukaryot, [2]:Gram negative, [3]:Gram positive
+        labels_batch= [[],[],[],[]]
         loss_list = []
-        for validation, labels, mask in validation_loader:
+        for validation, labels, mask, orga in validation_loader:
+            # preprocess outputs to correct format (1024*70*1)
             validation, labels, mask = validation.to(dev), labels.to(dev), mask.to(dev)
             outputs = model(validation.unsqueeze(3))
             outputs.squeeze_()
             outputs = outputs.permute(2,0,1)
+            # apply conditional random field and decode via Vertibri algorithm
             loss = -model.crf(outputs, labels.permute(1,0), mask = mask.permute(1,0))
             predicted = nn.Tensor(model.crf.decode(outputs)).cuda()
             #loss = criterion(outputs.squeeze_(), labels)
             #_, predicted = torch.max(outputs.data, 1)
+            # calculate quality measurements
             correct += (predicted == labels.float()).sum().item()    
             total = total + (labels.size(0) * labels.size(1))
-            result = ((correct / total) * 100)        
-            mcc, cm = calcMCCbatch(labels, predicted)
-            cm_valid += cm 
-            mcc_sum.append(mcc)
-            loss_list.append(loss.item())
-        true_mcc = sum(mcc_sum)/len(mcc_sum)
+            result = ((correct / total) * 100) 
+            predicted_batch, labels_batch = orgaBatch(labels, predicted, orga, predicted_batch, labels_batch)
+            loss_list.append(loss.item())         
+        mcc, cm = calcMCCbatch(labels_batch, predicted_batch)
+        mcc_orga, cm_orga = calcMCCorga(labels_batch, predicted_batch)
         loss_ave = sum(loss_list)/len(loss_list)
-        print('Accuracy of the model on the validation proteins is: {:.2f}%, Loss:{:.3f} and MCC is: {:.2f}'.format(result,loss_ave,true_mcc))
-    return result, true_mcc, loss_ave, cm_valid
+        print('Accuracy of the model on the validation proteins is: {:.2f}%, Loss:{:.3f} and MCC is: {:.2f}'.format(result,loss_ave,mcc))
+    return result, mcc, loss_ave, cm,  mcc_orga, cm_orga
 # =============================================================================
 # Execute when running script
 # =============================================================================
@@ -327,6 +359,7 @@ if __name__ == "__main__":
         except: print('Benchmark and validation split cannot be the same when doing a normal run with benchmarking because of continous biased evaluation.')
     if cross_validation and not normal_run:
         out = cross_validate() 
+    else: print('Disable normal run to do cross validation!')
     if gridsearch :     
         cross_valid_params = []
         for y in range(len(all_learning_rate)):

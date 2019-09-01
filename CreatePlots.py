@@ -7,10 +7,11 @@ Created on Wed Jun 19 21:44:48 2019
 from scipy.interpolate import make_interp_spline
 import numpy as np
 import matplotlib.pyplot as plt
+import pandas as pd
 # =============================================================================
 # Functions to create plots
 # =============================================================================
-def create_plts(out_params, cross_validation, benchmark, split, root, learning_rate, num_epochs):
+def create_plts(out_params, cross_validation, benchmark, split, root, learning_rate, num_epochs, mcc_orga = 0, cm_orga = 0):
     split = str(split)
     if cross_validation:
         calcSTDandMEANplot(out_params, 0,1, 'loss', root, learning_rate, num_epochs)
@@ -19,7 +20,15 @@ def create_plts(out_params, cross_validation, benchmark, split, root, learning_r
     elif benchmark:
         c = ['Others(non-Sp)', 'S', 'T', 'L'] #['I','M','O', 'S', 'T', 'L']
         plot_confusion_matrix (out_params, c, root, learning_rate, num_epochs, split, title = 'Confusion matrix of benchmark split '+split+', without normalization')
-        plot_confusion_matrix (out_params, c, root, learning_rate, num_epochs, split, normalize=True, title = 'Confusion matrix of benchmark split '+split+', with normalization')
+        plot_confusion_matrix (cm_orga[0], c, root, learning_rate, num_epochs, split, title = 'Benchmark split '+split+', Organism = Archea')
+        plot_confusion_matrix (cm_orga[1], c, root, learning_rate, num_epochs, split, title = 'Benchmark split '+split+', Organism = Eukaryot')
+        plot_confusion_matrix (cm_orga[2], c, root, learning_rate, num_epochs, split, title = 'Benchmark split '+split+', Organism = Gram negative')
+        plot_confusion_matrix (cm_orga[3], c, root, learning_rate, num_epochs, split, title = 'Benchmark split '+split+', Organism = Gram positive')
+        plot_confusion_matrix (cm_orga[0], c, root, learning_rate, num_epochs, split, normalize=True, title = 'Benchmark split '+split+' normalized, Organism = Archea')
+        plot_confusion_matrix (cm_orga[1], c, root, learning_rate, num_epochs, split, normalize=True, title = 'Benchmark split '+split+' normalized, Organism = Eukaryot')
+        plot_confusion_matrix (cm_orga[2], c, root, learning_rate, num_epochs, split, normalize=True, title = 'Benchmark split '+split+' normalized, Organism = Gram negative')
+        plot_confusion_matrix (cm_orga[3], c, root, learning_rate, num_epochs, split, normalize=True, title = 'Benchmark split '+split+' normalized, Organism = Gram positive')
+        comparisonBar(mcc_orga, root, split, learning_rate, num_epochs)
     else:        
         #------------------------------Loss------------------------------
         loss_val, loss_train, epochs, acc_val, acc_train, mcc_val, mcc_train = (np.array([x[0] for x in out_params]),
@@ -64,7 +73,22 @@ def create_plts(out_params, cross_validation, benchmark, split, root, learning_r
         plot_confusion_matrix (cm_train, c, root, learning_rate, num_epochs, split, normalize=True, title = 'Confusion matrix trainset, with normalization')
         plot_confusion_matrix (cm_valid, c, root, learning_rate, num_epochs, split, normalize=True, title = 'Confusion matrix  split '+split+', with normalization')
     
-        
+def comparisonBar(mcc_orga, root, split, learning_rate, num_epochs):
+    #papervalues for mcc 
+    archea = [mcc_orga[0], 0.938 , 0.83  ,0.78]
+    eukaryot = [mcc_orga[1], 0.907, 0.39, 0.42]
+    gram_neg = [mcc_orga[2], 0.89, 0.8, 0.81]
+    gram_pos = [mcc_orga[3], 0.966, 0.97, 0.85]
+    algorithms = ['Seq 2 Vec', 'Signal P5', 'LipoP', 'Philius']
+    df = pd.DataFrame({'Archea': archea, 'Eukaryot': eukaryot, 'Gram-negative bacteria':gram_neg,
+                       'Gram-positive bacteria':gram_pos}, index=algorithms)
+    ax = df.plot.barh()
+    ax.set_title('Comparison of MCC scores of algorithms across organisms')
+    plt.xlabel('MCC Score')
+    plt.ylabel('Different algorithms')
+    plt.savefig(root + 'Pictures\\Benchmark_'+ split +'_lr_' + str(learning_rate) + '_epochs_' + str(num_epochs) + '_comparison_plot.png')
+    plt.close()
+    
 def calcSTDandMEANplot(out_params, x, y, param, root, learning_rate, num_epochs):
     mean_valid = []
     std_valid = []
