@@ -27,13 +27,13 @@ root = 'C:\\Users\\Thomas\\Documents\\Uni_masters\\MasterPrak_Data\\'
 params = {'batch_size': 200,
           'shuffle': True,
           'num_workers': 0}
-num_epochs = 41
+num_epochs = 501
 learning_rate = 5e-4
 weights = [0.05, 0.95, 0.99, 0.98]
 dev = torch.device('cuda')
 #dev = torch.device('cpu')
 class_weights = torch.FloatTensor(weights).to(dev)
-printafterepoch = 5
+printafterepoch = 50
 #--------------- Cross Validation ---------------
 cross_validation = False
 #--------------- Parameterize grid search here ---------------
@@ -76,22 +76,23 @@ def main(split,benchmark):
             bench_data, bench_labels, bench_orga = de_serializeBenchmark(benchmark_split)
             bench_dataset = CustomDataset(bench_data, bench_labels, bench_orga)
             bench_loader = DataLoader(bench_dataset, **params)
-            result, true_mcc, loss_ave, cm , mcc_orga, cm_orga = validate(bench_loader, model, dev)
+            result, true_mcc, loss_ave, cm , mcc_orga, cm_orga, label_predicted_batch = validate(bench_loader, model, dev)
             print('Confusion matrix is:\n', cm)
+            createcompfile(root,label_predicted_batch)
             create_plts(cm, cross_validation, benchmark, benchmark_split, root, learning_rate, num_epochs, mcc_orga = mcc_orga, cm_orga = cm_orga)
         except:
             print('No model found for benchmarking! Start a new run with benchmark = False!')
     else:
         print('Validationset is:', split, 'Benchmarkset is:', benchmark_split)
         # train on the GPU or on the CPU, if a GPU is not available
-        train_data, train_labels, validation_data, validation_labels, info = de_serializeInput(split)
-        train_dataset = CustomDataset(train_data,train_labels)
-        validation_dataset = CustomDataset(validation_data,validation_labels)
+        train_data, train_labels, validation_data, validation_labels, info, train_orga, validation_orga = de_serializeInput(split)
+        train_dataset = CustomDataset(train_data, train_labels, train_orga)
+        validation_dataset = CustomDataset(validation_data, validation_labels, validation_orga)
         train_loader = DataLoader(train_dataset, **params)
         validation_loader = DataLoader(validation_dataset, **params)
         model = SimpleCNN(num_classes)
         model = model.to(dev)
-        model, out_params = train(model, train_loader, validation_loader, 
+        model, out_params, label_predicted_batch = train(model, train_loader, validation_loader, 
                                   num_epochs, learning_rate, dev)
         if normal_run and not cross_validation and not gridsearch:
             create_plts(out_params, cross_validation, benchmark ,split, root, learning_rate, num_epochs)
@@ -102,7 +103,7 @@ def main(split,benchmark):
 # =============================================================================
 def de_serializeInput(validation_split):    
     all_features, info = loaddata('signalP4.npz', 'train_set.fasta')
-    train_data,train_labels,validation_data,validation_labels = [],[],[],[]
+    train_data,train_labels,train_orga = [],[],[]
     try:       
         print('Loading pickled files...')
         for split in range(splits):
@@ -112,32 +113,33 @@ def de_serializeInput(validation_split):
             if split == benchmark_split:
                 continue
             elif split == validation_split:
-                validation_data,validation_labels = split_data, split_labels
+                validation_data,validation_labels, validation_orga = split_data, split_labels, split_orga
             else:
                 train_data.extend(split_data)
                 train_labels.extend(split_labels)
+                train_orga.extend(split_orga)
         print('Done!')
     except (OSError, IOError):     
         print('Pickled files not found!\nCreating new train/validation dataset...')
         for split in range(splits):           
             split_keys = selectTestTrainSplit(info,split)
-            split_data, split_labels = createDataVectors(info,all_features,split_keys)
+            split_data, split_labels, split_orga = createDataVectors(info,all_features,split_keys)
             pickle.dump(split_data, open( root+"pickled_files\\split_"+str(split)+"_data.pickle", "wb" ))
             pickle.dump(split_labels, open( root+"pickled_files\\split_"+str(split)+"_labels.pickle", "wb" ))
             pickle.dump(split_orga, open( root+"pickled_files\\split_"+str(split)+"_orga.pickle", "wb" ))
             if split == benchmark_split:
                 continue
             elif split == validation_split:
-                validation_data,validation_labels = split_data, split_labels
+                validation_data,validation_labels, validation_orga = split_data, split_labels, split_orga
             else:
                 train_data.extend(split_data)
                 train_labels.extend(split_labels)
+                train_orga.extend(split_orga)
         print('Saved and Done!')
-    return train_data,train_labels,validation_data,validation_labels,info
+    return train_data,train_labels,validation_data,validation_labels,info, train_orga, validation_orga
 
 def  de_serializeBenchmark(bench_split):
     all_features, info = loaddata('signalP4.npz', 'benchmark_set.fasta')
-    bench_data, bench_labels = [],[]
     try:       
         print('Loading pickled benchmark files...')        
         bench_data = pickle.load(open(root+"pickled_files\\bench_"+str(bench_split)+"_data.pickle", "rb"))
@@ -218,6 +220,14 @@ def createDataVectors(info, all_features, keys):
 def selectTestTrainSplit(train_data,x):
     split = [key  for (key, value) in train_data.items() if value[1] == str(x)]
     return split
+
+def createcompfile(root, label_predicted_batch):
+    f = open(root+"comparison.txt","w+")
+    for i in range(len(label_predicted_batch[0])):
+        f.write("True labels: " + str(label_predicted_batch[0][i].tolist()))
+        f.write("\nPred labels: " + str(label_predicted_batch[1][i].astype(int).tolist())+ "\n")
+        f.write("\n")
+    f.close()
 # =============================================================================
 # Functions for training/validation
 # =============================================================================
@@ -234,7 +244,7 @@ def calcClassImbalance(info):
         counts[5] = counts[5] + classes.count('L')
     return counts
 
-def orgaBatch (labels, predicted, orga, predicted_batch, labels_batch ):
+def orgaBatch (labels, predicted, orga, predicted_batch, labels_batch, label_predicted_batch):
     #to do: apply in validate
     predicted, labels = predicted.to('cpu').numpy(), labels.to('cpu').numpy()
     for x in range(len(labels)):
@@ -250,7 +260,9 @@ def orgaBatch (labels, predicted, orga, predicted_batch, labels_batch ):
         elif orga[x] == 'POSITIVE':
             predicted_batch[3].extend(predicted[x])
             labels_batch[3].extend(labels[x])
-    return predicted_batch, labels_batch
+        label_predicted_batch[0].append(labels[x])
+        label_predicted_batch[1].append(predicted[x])
+    return predicted_batch, labels_batch, label_predicted_batch
 
 def calcMCCbatch (labels_batch, predicted_batch):
 #   calculate MCC over given batches of an epoch in training/validation 
@@ -277,6 +289,7 @@ def train(model, train_loader, validation_loader, num_epochs, learning_rate, dev
     total_step = len(train_loader)
     predicted_batch = [[],[],[],[]] # [0]:Archea, [1]:Eukaryot, [2]:Gram negative, [3]:Gram positive
     labels_batch= [[],[],[],[]]
+    label_predicted_batch = [[],[]]
     out_params = []
     criterion = torch.nn.CrossEntropyLoss(weight = class_weights, ignore_index = -100, reduction = 'mean')
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
@@ -284,7 +297,7 @@ def train(model, train_loader, validation_loader, num_epochs, learning_rate, dev
         loss_train_list = []
         correct = 0
         total = 0 
-        for i, (train, labels, mask, orga) in train_loader:
+        for i, (train, labels, mask, orga) in enumerate(train_loader):
             # Run the forward pass
             train, labels, mask = train.to(dev), labels.to(dev), mask.to(dev)
             outputs = model(train.unsqueeze(3))
@@ -304,22 +317,22 @@ def train(model, train_loader, validation_loader, num_epochs, learning_rate, dev
                 #predicted = predicted.squeeze_()
                 predicted = nn.Tensor(model.crf.decode(outputs)).cuda()
                 correct += (predicted == labels.float()).sum().item()     
-                predicted_batch, labels_batch = orgaBatch(labels, predicted, orga, predicted_batch, labels_batch)
+                predicted_batch, labels_batch, label_predicted_batch = orgaBatch(labels, predicted, orga, predicted_batch, labels_batch, label_predicted_batch)
                 loss_train_list.append(loss.item())  
                 
         # and print the results
         if (epoch%printafterepoch) == 0:            
-            mcc_train, cm_train = calcMCCbatch(labels, predicted)
+            mcc_train, cm_train = calcMCCbatch(labels_batch, predicted_batch)
             acc_train = (correct / total)*100
             loss_ave = sum(loss_train_list)/len(loss_train_list)
             print('Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}, Accuracy: {:.2f}%, MCC: {:.2f}'
                   .format(epoch+1, num_epochs, i + 1, total_step, loss_ave,
                           acc_train, mcc_train))
-            acc_valid, mcc_valid, loss_valid, cm_valid, mcc_orga, cm_orga= validate(validation_loader, model, dev, criterion = criterion)
-            out_params.append((loss_valid, loss_ave, epoch, acc_valid, acc_train, mcc_valid, mcc_train , mcc_orga, cm_orga, cm_train, cm_valid, ))
+            acc_valid, mcc_valid, loss_valid, cm_valid, mcc_orga, cm_orga, label_predicted_batch_val = validate(validation_loader, model, dev, criterion = criterion)
+            out_params.append((loss_valid, loss_ave, epoch, acc_valid, acc_train, mcc_valid, mcc_train , mcc_orga, cm_orga, cm_train, cm_valid))
     # check overfitting
     print('Best validation loss:', min(out_params)[0]  ,' at epoch:', min(out_params)[2])
-    return model, out_params
+    return model, out_params, label_predicted_batch
 
 def validate(validation_loader, model, dev, criterion = None):
     with torch.no_grad():   
@@ -327,6 +340,7 @@ def validate(validation_loader, model, dev, criterion = None):
         total = 0
         predicted_batch = [[],[],[],[]] # [0]:Archea, [1]:Eukaryot, [2]:Gram negative, [3]:Gram positive
         labels_batch= [[],[],[],[]]
+        label_predicted_batch = [[],[]]
         loss_list = []
         for validation, labels, mask, orga in validation_loader:
             # preprocess outputs to correct format (1024*70*1)
@@ -343,13 +357,13 @@ def validate(validation_loader, model, dev, criterion = None):
             correct += (predicted == labels.float()).sum().item()    
             total = total + (labels.size(0) * labels.size(1))
             result = ((correct / total) * 100) 
-            predicted_batch, labels_batch = orgaBatch(labels, predicted, orga, predicted_batch, labels_batch)
+            predicted_batch, labels_batch, label_predicted_batch = orgaBatch(labels, predicted, orga, predicted_batch, labels_batch, label_predicted_batch)
             loss_list.append(loss.item())         
         mcc, cm = calcMCCbatch(labels_batch, predicted_batch)
         mcc_orga, cm_orga = calcMCCorga(labels_batch, predicted_batch)
         loss_ave = sum(loss_list)/len(loss_list)
         print('Accuracy of the model on the validation proteins is: {:.2f}%, Loss:{:.3f} and MCC is: {:.2f}'.format(result,loss_ave,mcc))
-    return result, mcc, loss_ave, cm,  mcc_orga, cm_orga
+    return result, mcc, loss_ave, cm,  mcc_orga, cm_orga, label_predicted_batch
 # =============================================================================
 # Execute when running script
 # =============================================================================
