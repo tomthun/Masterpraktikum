@@ -223,11 +223,45 @@ def selectTestTrainSplit(train_data,x):
 
 def createcompfile(root, label_predicted_batch):
     f = open(root+"comparison.txt","w+")
+    csdiff, gaps = cleavagediff(label_predicted_batch) 
+    f.write("Mean residue cleavage residue deviation of predicted to true label: " + str(csdiff) +
+            "\nGaps have been found at protein predictions: "+ str(gaps) + "\n")
     for i in range(len(label_predicted_batch[0])):
+        f.write("Protein "+ str(i)+ "\n")
         f.write("True labels: " + str(label_predicted_batch[0][i].tolist()))
-        f.write("\nPred labels: " + str(label_predicted_batch[1][i].astype(int).tolist())+ "\n")
-        f.write("\n")
+        f.write("\nPred labels: " + str(label_predicted_batch[1][i].astype(int).tolist()) + "\n")
     f.close()
+
+def cleavagediff(label_predicted_batch):
+    csdiff = 0
+    gaps = []
+    gapstr = []
+    for i in range (len(label_predicted_batch[0])):
+        truth, prediction = label_predicted_batch[0][i], label_predicted_batch[1][i]
+        if (truth != prediction).any():
+            csdiff += abs(truth[truth != 0].size - prediction[prediction != 0].size)
+        gap = containsgap(prediction)
+        gapsi = containsgap(truth)
+        if gap:
+            gaps.append(i)
+        if gapsi:
+            gapstr.append(i)
+    csdiff = csdiff/len(label_predicted_batch[0]) 
+    if len(gaps) > 0: 
+        print('The prediction contains gaps at : ' + str(gaps))      
+    if len(gapstr) > 0: 
+        print('The true labels contain gaps at : ' + str(gapstr))
+    else: print ('True labels have no gaps')
+    return csdiff, gaps
+
+def containsgap(prediction):
+    gap = False
+    x = (prediction == 0)
+    x = np.where(x[:-1] != x[1:])[0].size
+    if x > 1:
+        gap = True
+    return gap
+
 # =============================================================================
 # Functions for training/validation
 # =============================================================================
