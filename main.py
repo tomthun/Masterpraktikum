@@ -78,7 +78,7 @@ def main(split,benchmark):
             bench_loader = DataLoader(bench_dataset, **params)
             result, true_mcc, loss_ave, cm , mcc_orga, cm_orga, label_predicted_batch = validate(bench_loader, model, dev)
             print('Confusion matrix is:\n', cm)
-            createcompfile(root,label_predicted_batch)
+            createcompfile(root,label_predicted_batch, true_mcc)
             create_plts(cm, cross_validation, benchmark, benchmark_split, root, learning_rate, num_epochs, mcc_orga = mcc_orga, cm_orga = cm_orga)
         except:
             print('No model found for benchmarking! Start a new run with benchmark = False!')
@@ -221,47 +221,75 @@ def selectTestTrainSplit(train_data,x):
     split = [key  for (key, value) in train_data.items() if value[1] == str(x)]
     return split
 
-def createcompfile(root, label_predicted_batch):
+def createcompfile(root, label_predicted_batch, mcc_pre):
+    k,j = 0, 0
+    mcc_post = 0.0, 0.0
     f = open(root+"comparison.txt","w+")
-    csdiff, gaps = cleavagediff(label_predicted_batch) 
+    csdiff, gaps, mixed, label_predicted_batch, org_pred = postProcess(label_predicted_batch) 
+    mcc_post = calcMCC(label_predicted_batch)
     f.write("Mean residue cleavage residue deviation of predicted to true label: " + str(csdiff) +
-            "\nGaps have been found at protein predictions: "+ str(gaps) + "\n")
+            "\nMCC before postprocessing: " + str(mcc_pre) + " MCC after postprocessing: " + str(mcc_post) +
+            "\nGaps have been found at protein predictions: "+ str(gaps) + " and have been post-processed" +
+            "\nMixed Signal peptide predictions have been found at: "+ str(mixed) + " and have been post-processed\n")
     for i in range(len(label_predicted_batch[0])):
         f.write("Protein "+ str(i)+ "\n")
-        f.write("True labels: " + str(label_predicted_batch[0][i].tolist()))
-        f.write("\nPred labels: " + str(label_predicted_batch[1][i].astype(int).tolist()) + "\n")
+        f.write("True labels:      " + str(label_predicted_batch[0][i].tolist()) + "\n")
+        if i in gaps: 
+            f.write("Orig pred labels: " + str(org_pred[0][j].tolist()) + "\n") 
+            j += 1
+        if i in mixed:
+            f.write("Orig pred labels: " + str(org_pred[1][k].tolist()) + "\n") 
+            k += 1
+        f.write("Predicted labels: " + str(label_predicted_batch[1][i].astype(int).tolist()) + "\n")        
     f.close()
 
-def cleavagediff(label_predicted_batch):
+def postProcess(label_predicted_batch):
     csdiff = 0
-    gaps = []
-    gapstr = []
+    gaps, mixed, org_pred = [], [], [[], []]
+    gapstr,mixedstr = [],[]
     for i in range (len(label_predicted_batch[0])):
         truth, prediction = label_predicted_batch[0][i], label_predicted_batch[1][i]
-        if (truth != prediction).any():
-            csdiff += abs(truth[truth != 0].size - prediction[prediction != 0].size)
-        gap = containsgap(prediction)
-        gapsi = containsgap(truth)
+        gap, mixedtype, prediction = processPrediction(prediction,org_pred)
+        gapsi,mixedsi,_ = processPrediction(truth,[[],[]])
         if gap:
             gaps.append(i)
         if gapsi:
             gapstr.append(i)
+        if mixedsi:
+            mixedstr.append(i)
+        if mixedtype:
+            mixed.append(i)
+        label_predicted_batch[1][i] = prediction 
+        csdiff += abs(truth[truth != 0].size - prediction[prediction != 0].size)
     csdiff = csdiff/len(label_predicted_batch[0]) 
-    if len(gaps) > 0: 
-        print('The prediction contains gaps at : ' + str(gaps))      
-    if len(gapstr) > 0: 
-        print('The true labels contain gaps at : ' + str(gapstr))
-    else: print ('True labels have no gaps')
-    return csdiff, gaps
+    print('The prediction contains gaps at : ' + str(gaps))      
+    print('The true labels contain gaps at : ' + str(gapstr))
+    print('The prediction contains mixed SP types at : ' + str(mixed)) 
+    print('The true labels contain mixed SP types at : ' + str(mixedstr))
+    return csdiff, gaps, mixed, label_predicted_batch, org_pred
 
-def containsgap(prediction):
+def processPrediction (prediction,org_pr):
     gap = False
+    mixedtype = False
     x = (prediction == 0)
-    x = np.where(x[:-1] != x[1:])[0].size
-    if x > 1:
+    x = np.where(x[:-1] != x[1:])[0]
+    if  x.size > 1:
         gap = True
-    return gap
+        org_pr[0].append(prediction.astype(int))
+    if np.unique(prediction).size > 2:
+        mixedtype = True
+        org_pr[1].append(prediction.astype(int))
+    if x.size > 1 or np.unique(prediction).size > 2:    
+        gap_end = x[x.size-1]+1
+        most_common_residue = np.bincount(prediction[:gap_end].astype(int)).argmax()
+        prediction[:(gap_end)] = most_common_residue
+    return gap, mixedtype, prediction
 
+def calcMCC(label_predicted_batch):
+    x = [list(label) for label in label_predicted_batch[0]]
+    y = [list(label) for label in label_predicted_batch[1]]
+    mcc, cm = calcMCCbatch(x,y)
+    return mcc
 # =============================================================================
 # Functions for training/validation
 # =============================================================================
