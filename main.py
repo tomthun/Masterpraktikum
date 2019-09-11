@@ -27,21 +27,24 @@ root = 'C:\\Users\\Thomas\\Documents\\Uni_masters\\MasterPrak_Data\\'
 params = {'batch_size': 200,
           'shuffle': True,
           'num_workers': 0}
-num_epochs = 501
+num_epochs = 21
 learning_rate = 5e-4
 weights = [0.05, 0.95, 0.99, 0.98]
+
 dev = torch.device('cuda')
 #dev = torch.device('cpu')
 class_weights = torch.FloatTensor(weights).to(dev)
-printafterepoch = 50
+printafterepoch = 2
 #--------------- Cross Validation ---------------
 cross_validation = False
 #--------------- Parameterize grid search here ---------------
-gridsearch = False
-all_num_epochs = (50,100,150,200)
-all_learning_rate = (1e-2, 1e-3, 1e-4, 5e-4 ,1e-5)
+gridsearch = True
+if gridsearch: cross_validation = True
+all_num_epochs = [21,23,25,27]
+allweigths = [1.0, 1.0, 1.0, 1.0],[0.25, 0.65, 0.66, 0.66], [0.001, 0.99, 0.99, 0.99], [0.5, 0.5, 0.5, 0.5]
+all_learning_rate = (1e-3, 1e-4, 5e-4 ,1e-5)
 #--------------- Benchmark ---------------
-benchmark = True
+benchmark = False
 normal_run = False
 #---Selected split to benchmark/validate upon (0-4, !must not be the same!)---
 selected_split = 0
@@ -433,13 +436,21 @@ if __name__ == "__main__":
     if selected_split == benchmark_split and benchmark:
         try: raise SystemExit
         except: print('Benchmark and validation split cannot be the same when doing a normal run with benchmarking because of continous biased evaluation.')
-    if cross_validation and not normal_run:
+    if cross_validation and not normal_run and not gridsearch:
+        print("Starting normal cross-validation run...")
         out = cross_validate() 
-    else: print('Disable normal run to do cross validation!')
+    else: print('Disable normal run and gridsearch to do simple cross validation!')
     if gridsearch :     
         cross_valid_params = []
-        for y in range(len(all_learning_rate)):
-            learning_rate = all_learning_rate[y]
+        print("Starting gridsearch... This can take up to a day or two...")
+#        for y in range(len(all_learning_rate)):
+#            learning_rate = all_learning_rate[y]
+#            out = cross_validate()
+#            cross_valid_params.append(out)
+        learning_rate = 1e-3
+        for y in range(len(all_num_epochs)):            
+            num_epochs = all_num_epochs[y]
+            weights = allweigths[y]
             out = cross_validate()
             cross_valid_params.append(out)
     if normal_run:
