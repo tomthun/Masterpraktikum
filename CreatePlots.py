@@ -8,17 +8,18 @@ from scipy.interpolate import make_interp_spline
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
+plt.rcParams["figure.figsize"] = [9,6]
 # =============================================================================
 # Functions to create plots
 # =============================================================================
-def create_plts(out_params, cross_validation, benchmark, split, root, learning_rate, num_epochs, mcc_orga = 0, cm_orga = 0):
+def create_plts(out_params, cross_validation, benchmark, split, root, learning_rate, num_epochs, mcc_orga = 0, cm_orga = 0, benchmark_crossvalid = False):
     split = str(split)
+    c = ['Others(non-Sp)', 'S', 'T', 'L'] #['I','M','O', 'S', 'T', 'L']
     if cross_validation:
         calcSTDandMEANplot(out_params, 0,1, 'loss', root, learning_rate, num_epochs)
         calcSTDandMEANplot(out_params, 3,4, 'accuracy', root, learning_rate, num_epochs)
         calcSTDandMEANplot(out_params, 5,6, 'MCC', root, learning_rate, num_epochs)
     elif benchmark:
-        c = ['Others(non-Sp)', 'S', 'T', 'L'] #['I','M','O', 'S', 'T', 'L']
         plot_confusion_matrix (out_params, c, root, learning_rate, num_epochs, split, title = 'Confusion matrix of benchmark split '+split+', without normalization')
         plot_confusion_matrix (cm_orga[0], c, root, learning_rate, num_epochs, split, title = 'Benchmark split '+split+', Organism = Archea')
         plot_confusion_matrix (cm_orga[1], c, root, learning_rate, num_epochs, split, title = 'Benchmark split '+split+', Organism = Eukaryot')
@@ -29,6 +30,13 @@ def create_plts(out_params, cross_validation, benchmark, split, root, learning_r
         plot_confusion_matrix (cm_orga[2], c, root, learning_rate, num_epochs, split, normalize=True, title = 'Benchmark split '+split+' normalized, Organism = Gram negative')
         plot_confusion_matrix (cm_orga[3], c, root, learning_rate, num_epochs, split, normalize=True, title = 'Benchmark split '+split+' normalized, Organism = Gram positive')
         comparisonBar(mcc_orga, root, split, learning_rate, num_epochs)
+    elif benchmark_crossvalid:
+        boxplt (0,1,out_params, 'Boxplot of residual MCCs', root, learning_rate,num_epochs)
+        boxplt (2,3,out_params, 'Boxplot of global MCCs', root, learning_rate, num_epochs)
+        boxplt (4,5,out_params, 'Boxplot of standard deviation of the real cleavage site', root, learning_rate, num_epochs)
+        cm_standard, cm_mean = meanstdCM(out_params)
+        plot_confusion_matrix (cm_mean, c, root, learning_rate, num_epochs, split, normalize=True, title='Normalized benchmark with standard deviation between cross-validation ', 
+                          cm_standard = cm_standard, cm_benchmark = True)
     else:        
         #------------------------------Loss------------------------------
         loss_val, loss_train, epochs, acc_val, acc_train, mcc_val, mcc_train = (np.array([x[0] for x in out_params]),
@@ -65,7 +73,6 @@ def create_plts(out_params, cross_validation, benchmark, split, root, learning_r
         plt.savefig(root + 'Pictures\\mcc_plot_lr_' + str(learning_rate) + '_epochs_' + str(num_epochs) + '_split_'+split+'.png')
         plt.close()
         #------------------------------Confusion matrix------------------------------
-        c = ['Others(non-Sp)', 'S', 'T', 'L'] #['I','M','O', 'S', 'T', 'L']
         last_entry = out_params[len(out_params)-1]
         cm_valid, cm_train = last_entry[len(last_entry)-1] , last_entry[len(last_entry)-2]
         plot_confusion_matrix (cm_train, c, root, learning_rate, num_epochs, split, title = 'Confusion matrix trainset, without normalization')
@@ -88,6 +95,15 @@ def comparisonBar(mcc_orga, root, split, learning_rate, num_epochs):
     plt.ylabel('Different algorithms')
     plt.savefig(root + 'Pictures\\Benchmark_'+ split +'_lr_' + str(learning_rate) + '_epochs_' + str(num_epochs) + '_comparison_plot.png')
     plt.close()
+    
+def boxplt (pre,post,out, title, root, learning_rate,num_epochs):
+    x = [x[pre] for x in out]
+    y = [x[post] for x in out]
+    plt.boxplot([x,y])
+    plt.title(title)
+    plt.xticks([1, 2], ['before post-processing', 'after post-processing'])   
+    plt.savefig(root + 'Pictures\\'+ title +'_lr_' + str(learning_rate) + '_epochs_' + str(num_epochs) + '_plot.png')
+    plt.close
     
 def calcSTDandMEANplot(out_params, x, y, param, root, learning_rate, num_epochs):
     mean_valid = []
@@ -121,7 +137,7 @@ def calcSTDandMEANplot(out_params, x, y, param, root, learning_rate, num_epochs)
     plt.close()
     
 def plot_confusion_matrix (cm, classes, root, learning_rate, num_epochs, split, normalize=False, title=None, 
-                          cmap=plt.cm.Blues):
+                          cmap=plt.cm.Blues, cm_standard = 0, cm_benchmark = False):
     """
     This function prints and plots the confusion matrix.
     Normalization can be applied by setting `normalize=True`.
@@ -134,8 +150,10 @@ def plot_confusion_matrix (cm, classes, root, learning_rate, num_epochs, split, 
 
     # Only use the labels that appear in the data
     if normalize:
-        cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
-
+        cm_norm = cm.sum(axis=1)[:, np.newaxis]
+        cm = cm.astype('float') / cm_norm
+        if cm_benchmark:
+            cm_standard = cm_standard.astype('float') / cm_norm
     fig, ax = plt.subplots()
     im = ax.imshow(cm, interpolation='nearest', cmap=cmap)
     ax.figure.colorbar(im, ax=ax)
@@ -155,14 +173,31 @@ def plot_confusion_matrix (cm, classes, root, learning_rate, num_epochs, split, 
     # Loop over data dimensions and create text annotations.
     fmt = '.2f' if normalize else 'd'
     thresh = cm.max() / 2.
-    for i in range(cm.shape[0]):
-        for j in range(cm.shape[1]):
-            ax.text(j, i, format(cm[i, j], fmt),
-                    ha="center", va="center",
-                    color="white" if cm[i, j] > thresh else "black")
+    if cm_benchmark:
+        for i in range(cm.shape[0]):
+            for j in range(cm.shape[1]):
+                ax.text(j, i, format(cm[i, j], fmt) + " +/- " + format(cm_standard[i,j], fmt),
+                        ha="center", va="center",
+                        color="white" if cm[i, j] > thresh else "black")
+    else: 
+        for i in range(cm.shape[0]):
+            for j in range(cm.shape[1]):
+                ax.text(j, i, format(cm[i, j], fmt),
+                        ha="center", va="center",
+                        color="white" if cm[i, j] > thresh else "black")
     fig.tight_layout()
     plt.show()
-    plt.savefig(root + 'Pictures\\' + title + '_lr_' + str(learning_rate) + '_epochs_' + str(num_epochs) + '_split_'+split+'.png')
+    plt.savefig(root + 'Pictures\\' + title + '_lr_' + str(learning_rate) + '_epochs_' + str(num_epochs) + '_split_'+str(split)+'.png')
     plt.close()
     return ax
 
+def meanstdCM(outparams):
+    cms = outparams[len(outparams)-1] 
+    cm_mean = 0
+    cm_standard = 0
+    for cm in cms:
+        cm_mean += cm
+    cm_mean = cm_mean/len(cms)
+    for cm in cms:
+        cm_standard += abs(cm_mean - cm)
+    return cm_mean, cm_standard

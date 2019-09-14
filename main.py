@@ -42,14 +42,14 @@ printafterepoch = 5
 no_crf = False
 #--------------- Cross Validation ---------------
 cross_validation = False
-benchmarked_cross_validation = True
+benchmarked_cross_validation = False
 #--------------- Parameterize grid search here ---------------
 gridsearch = False
 all_num_epochs = [21,23,25,27]
 allweigths = [1.0, 1.0, 1.0, 1.0],[0.25, 0.65, 0.66, 0.66], [0.001, 0.99, 0.99, 0.99], [0.5, 0.5, 0.5, 0.5]
 all_learning_rate = (1e-3, 1e-4, 5e-4 ,1e-5)
 #--------------- Benchmark ---------------
-benchmark = False
+benchmark = True
 normal_run = False
 #---Selected split to benchmark/validate upon (0-4, !must not be the same!)---
 selected_split = 0
@@ -78,6 +78,7 @@ def cross_benchmark():
         out = main(split, benchmark_split)
         out = main(split, benchmark_split, True)
         params_list.append(out)
+    create_plts(params_list, cross_validation, False, split, root, learning_rate, num_epochs,benchmark_crossvalid = True)  
     return params_list
 
 def main(split,benchmark_split, benchmark = False):
@@ -96,9 +97,9 @@ def main(split,benchmark_split, benchmark = False):
             bench_loader = DataLoader(bench_dataset, **params)
             acc, true_mcc, loss_ave, cm , mcc_orga, cm_orga, label_predicted_batch = validate(bench_loader, model, dev)
             print('Confusion matrix is:\n', cm)
-            mcc_res_post, mcc_glob_post, mcc_glob_pre = createcompfile(root,label_predicted_batch, true_mcc)
+            mcc_res_post, mcc_glob_post, mcc_glob_pre, cs_pre, cs_post = createcompfile(root,label_predicted_batch, true_mcc)
             create_plts(cm, cross_validation, benchmark, benchmark_split, root, learning_rate, num_epochs, mcc_orga = mcc_orga, cm_orga = cm_orga)
-            out_params = [true_mcc, mcc_res_post, mcc_glob_post, mcc_glob_pre, cm]
+            out_params = [true_mcc, mcc_res_post, mcc_glob_pre, mcc_glob_post, cs_pre, cs_post,  cm]
             return out_params
         except:
             print('No model found for benchmarking! Start a new run with benchmark = False!')
@@ -245,12 +246,14 @@ def createcompfile(root, label_predicted_batch, mcc_pre):
     k,j = 0, 0
     f = open(root+"comparison.txt","w+")
     mcc_glob_pre = calcGlobMCC(label_predicted_batch)
-    csdiff, gaps, mixed, label_predicted_batch, org_pred = postProcess(label_predicted_batch)
+    csdiff_pre = csdiff(label_predicted_batch)
+    gaps, mixed, label_predicted_batch, org_pred = postProcess(label_predicted_batch)
     mcc_glob_post = calcGlobMCC(label_predicted_batch)
+    csdiff_post = csdiff(label_predicted_batch)
     mcc_post = calcResMCC(label_predicted_batch)
-    f.write("Mean residue cleavage residue deviation of predicted to true label: " + str(round(csdiff,3)) +
-            "\nGlobulal signal peptide MCC before postprocessing: " + str(round(mcc_glob_pre,3)) + " Globulal signal peptide MCC after postprocessing: " + str(round(mcc_glob_post,3)) +
-            "\nResidue MCC before postprocessing: " + str(round(mcc_pre,3)) + " Residue MCC after postprocessing: " + str(round(mcc_post,3)) +
+    f.write("Mean residue cleavage residue deviation of predicted to true label before postprocessing: " + str(round(csdiff_pre,3)) + "and after" + str(round(csdiff_post,3)) +
+            "\nGlobulal signal peptide MCC before post-processing: " + str(round(mcc_glob_pre,3)) + " Globulal signal peptide MCC after post-processing: " + str(round(mcc_glob_post,3)) +
+            "\nResidue MCC before post-processing: " + str(round(mcc_pre,3)) + " Residue MCC after post-processing: " + str(round(mcc_post,3)) +
             "\nGaps have been found at protein predictions: "+ str(gaps) + " and have been post-processed" +
             "\nMixed Signal peptide predictions have been found at: "+ str(mixed) + " and have been post-processed\n")
     for i in range(len(label_predicted_batch[0])):
@@ -264,10 +267,9 @@ def createcompfile(root, label_predicted_batch, mcc_pre):
             k += 1
         f.write("Predicted labels: " + str(label_predicted_batch[1][i].astype(int).tolist()) + "\n")        
     f.close()
-    return mcc_post, mcc_glob_post, mcc_glob_pre
+    return mcc_post, mcc_glob_post, mcc_glob_pre, csdiff_pre, csdiff_post
 
 def postProcess(label_predicted_batch):
-    csdiff = 0
     gaps, mixed, org_pred = [], [], [[], []]
     gapstr,mixedstr = [],[]
     for i in range (len(label_predicted_batch[0])):
@@ -283,14 +285,19 @@ def postProcess(label_predicted_batch):
         if mixedtype:
             mixed.append(i)
         label_predicted_batch[1][i] = prediction 
-        csdiff += abs(truth[truth != 0].size - prediction[prediction != 0].size)
-    csdiff = csdiff/len(label_predicted_batch[0]) 
     print('The prediction contains gaps at : ' + str(gaps))      
     print('The true labels contain gaps at : ' + str(gapstr))
     print('The prediction contains mixed SP types at : ' + str(mixed)) 
     print('The true labels contain mixed SP types at : ' + str(mixedstr))
-    return csdiff, gaps, mixed, label_predicted_batch, org_pred
+    return gaps, mixed, label_predicted_batch, org_pred
 
+def csdiff(label_predicted_batch):
+    csdiff = 0
+    for batch in label_predicted_batch:
+        csdiff += abs(batch[0][batch[0] != 0].size - batch[1][batch[1] != 0].size)
+    csdiff = csdiff/len(label_predicted_batch[0]) 
+    return csdiff
+    
 def processPrediction (prediction, org_pr):
     gap = False
     mixedtype = False
