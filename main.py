@@ -14,7 +14,6 @@ import torch
 from torch.utils.data import DataLoader
 import time
 import sklearn.metrics as metrics
-from sklearn.metrics import confusion_matrix
 from CreatePlots import create_plts
 import torch as nn
 
@@ -27,7 +26,7 @@ root = 'C:\\Users\\Thomas\\Documents\\Uni_masters\\MasterPrak_Data\\'
 params = {'batch_size': 128,
           'shuffle': True,
           'num_workers': 0}
-num_epochs = 21
+num_epochs = 9
 learning_rate = 1e-3
 weights = [7.554062537062119e-07,
  1.2681182393446364e-05,
@@ -36,50 +35,58 @@ weights = [7.554062537062119e-07,
 dev = torch.device('cuda')
 #dev = torch.device('cpu')
 class_weights = torch.FloatTensor(weights).to(dev) # only for Cross entropy loss
-printafterepoch = 5
-
+printafterepoch = 4
 #--------------- Disable/Enable the addition of a crf ---------------
 no_crf = False
 #--------------- Cross Validation ---------------
 cross_validation = False
-benchmarked_cross_validation = False
+benchmarked_cross_validation = True
 #--------------- Parameterize grid search here ---------------
 gridsearch = False
 all_num_epochs = [21,23,25,27]
-allweigths = [1.0, 1.0, 1.0, 1.0],[0.25, 0.65, 0.66, 0.66], [0.001, 0.99, 0.99, 0.99], [0.5, 0.5, 0.5, 0.5]
 all_learning_rate = (1e-3, 1e-4, 5e-4 ,1e-5)
 #--------------- Benchmark ---------------
-benchmark = True
+benchmark = False
 normal_run = False
 #---Selected split to benchmark/validate upon (0-4, !must not be the same!)---
 selected_split = 0
-benchmark_split = 4
+benchmark_split = 1
 # =============================================================================
 # Main functions
 # =============================================================================
 def cross_validate():
     # do crossvalidation
-    params_list = []
+    params_list, params_listbench = [],[]
+    labels = []
+    predictions = []
     print('Starting cross-validation...')
     for split in range(splits):
         if split == benchmark_split:
             print('Skipping benchmark split...')
             continue
         out = main(split, benchmark_split, False)
+        outbench = main(split, benchmark_split, True)
+        labels += outbench[8][0]
+        predictions += outbench[8][1]
         params_list.append(out)
-    create_plts(params_list, cross_validation, False, split, root, learning_rate, num_epochs)  
-    return params_list
+        params_listbench.append(outbench)
+    return params_list, params_listbench, labels, predictions
 
 def cross_benchmark():
     params_list = []
+    labels = []
+    predictions = []
     print('Starting cross-validation...')
     for split in range(splits):
         benchmark_split = split
         out = main(split, benchmark_split)
         out = main(split, benchmark_split, True)
         params_list.append(out)
-    create_plts(params_list, cross_validation, False, split, root, learning_rate, num_epochs,benchmark_crossvalid = True)  
-    return params_list
+        labels += out[8][0]
+        predictions += out[8][1]
+    create_plts(params_list, cross_validation, False, split, root, learning_rate, 
+                num_epochs,benchmark_crossvalid = True,labels = labels, predictions = predictions)  
+    return params_list, labels, predictions
 
 def main(split,benchmark_split, benchmark = False):
     # create data folders if non-existent
@@ -97,9 +104,9 @@ def main(split,benchmark_split, benchmark = False):
             bench_loader = DataLoader(bench_dataset, **params)
             acc, true_mcc, loss_ave, cm , mcc_orga, cm_orga, label_predicted_batch = validate(bench_loader, model, dev)
             print('Confusion matrix is:\n', cm)
-            mcc_res_post, mcc_glob_post, mcc_glob_pre, cs_pre, cs_post = createcompfile(root,label_predicted_batch, true_mcc)
+            mcc_res_post, mcc_glob_post, mcc_glob_pre, cs_pre, cs_post, csreldiff_pre, csreldiff_post = createcompfile(root,label_predicted_batch,benchmark_split, true_mcc)
             create_plts(cm, cross_validation, benchmark, benchmark_split, root, learning_rate, num_epochs, mcc_orga = mcc_orga, cm_orga = cm_orga)
-            out_params = [true_mcc, mcc_res_post, mcc_glob_pre, mcc_glob_post, cs_pre, cs_post,  cm]
+            out_params = [true_mcc, mcc_res_post, mcc_glob_pre, mcc_glob_post, cs_pre, cs_post, csreldiff_pre, csreldiff_post, label_predicted_batch , cm]
             return out_params
         except:
             print('No model found for benchmarking! Start a new run with benchmark = False!')
@@ -149,7 +156,7 @@ def de_serializeInput(validation_split, benchmark_split):
             pickle.dump(split_labels, open( root+"pickled_files\\split_"+str(split)+"_labels.pickle", "wb" ))
             pickle.dump(split_orga, open( root+"pickled_files\\split_"+str(split)+"_orga.pickle", "wb" ))
             if split == benchmark_split and not benchmarked_cross_validation:
-                    continue
+                continue
             elif split == validation_split:
                 validation_data,validation_labels, validation_orga = split_data, split_labels, split_orga
             else:
@@ -242,18 +249,18 @@ def selectTestTrainSplit(train_data,x):
     split = [key  for (key, value) in train_data.items() if value[1] == str(x)]
     return split
 
-def createcompfile(root, label_predicted_batch, mcc_pre):
+def createcompfile(root, label_predicted_batch,split, mcc_pre):
     k,j = 0, 0
-    f = open(root+"comparison.txt","w+")
+    f = open(root+"comparison"+str(split)+".txt","w+")
     mcc_glob_pre = calcGlobMCC(label_predicted_batch)
-    csdiff_pre = csdiff(label_predicted_batch)
+    csdiff_pre, csreldiff_pre = csdiff(label_predicted_batch)
     gaps, mixed, label_predicted_batch, org_pred = postProcess(label_predicted_batch)
     mcc_glob_post = calcGlobMCC(label_predicted_batch)
-    csdiff_post = csdiff(label_predicted_batch)
-    mcc_post = calcResMCC(label_predicted_batch)
-    f.write("Mean residue cleavage residue deviation of predicted to true label before postprocessing: " + str(round(csdiff_pre,3)) + "and after" + str(round(csdiff_post,3)) +
-            "\nGlobulal signal peptide MCC before post-processing: " + str(round(mcc_glob_pre,3)) + " Globulal signal peptide MCC after post-processing: " + str(round(mcc_glob_post,3)) +
-            "\nResidue MCC before post-processing: " + str(round(mcc_pre,3)) + " Residue MCC after post-processing: " + str(round(mcc_post,3)) +
+    csdiff_post, csreldiff_post = csdiff(label_predicted_batch)
+    mcc_post, cm, acc = calcResMCC(label_predicted_batch)
+    f.write("Mean residue cleavage residue deviation of predicted to true label before postprocessing: " + str(round(csdiff_pre,3)) + " and after " + str(round(csdiff_post,3)) +
+            "\nGlobulal signal peptide MCC before post-processing: " + str(round(mcc_glob_pre,3)) + " and after: " + str(round(mcc_glob_post,3)) +
+            "\nResidue MCC before post-processing: " + str(round(mcc_pre,3)) + " and after: " + str(round(mcc_post,3)) +
             "\nGaps have been found at protein predictions: "+ str(gaps) + " and have been post-processed" +
             "\nMixed Signal peptide predictions have been found at: "+ str(mixed) + " and have been post-processed\n")
     for i in range(len(label_predicted_batch[0])):
@@ -267,7 +274,7 @@ def createcompfile(root, label_predicted_batch, mcc_pre):
             k += 1
         f.write("Predicted labels: " + str(label_predicted_batch[1][i].astype(int).tolist()) + "\n")        
     f.close()
-    return mcc_post, mcc_glob_post, mcc_glob_pre, csdiff_pre, csdiff_post
+    return mcc_post, mcc_glob_post, mcc_glob_pre, csdiff_pre, csdiff_post, csreldiff_pre, csreldiff_post
 
 def postProcess(label_predicted_batch):
     gaps, mixed, org_pred = [], [], [[], []]
@@ -290,13 +297,6 @@ def postProcess(label_predicted_batch):
     print('The prediction contains mixed SP types at : ' + str(mixed)) 
     print('The true labels contain mixed SP types at : ' + str(mixedstr))
     return gaps, mixed, label_predicted_batch, org_pred
-
-def csdiff(label_predicted_batch):
-    csdiff = 0
-    for batch in label_predicted_batch:
-        csdiff += abs(batch[0][batch[0] != 0].size - batch[1][batch[1] != 0].size)
-    csdiff = csdiff/len(label_predicted_batch[0]) 
-    return csdiff
     
 def processPrediction (prediction, org_pr):
     gap = False
@@ -328,15 +328,24 @@ def calcGlobMCC(label_predicted_batch):
     y = [label[0] for label in label_predicted_batch[1]]
     mcc = metrics.matthews_corrcoef(x, y)
     return mcc
-    
+
+def csdiff(label_predicted_batch):
+    csreldiff = []
+    csdiff = 0
+    label = label_predicted_batch[0]
+    prediction = label_predicted_batch[1]
+    for x in range (len(label_predicted_batch[0])):
+        csreldiff.append(label[x][label[x] != 0].size - prediction[x][prediction[x] != 0].size)
+        csdiff += abs(label[x][label[x] != 0].size - prediction[x][prediction[x] != 0].size)
+    csdiff = csdiff/len(label_predicted_batch[0])
+    return csdiff, csreldiff   
+ 
 def calcResMCC(label_predicted_batch):
     x = [list(label) for label in label_predicted_batch[0]]
     y = [list(label) for label in label_predicted_batch[1]]
-    mcc, cm = calcMCCbatch(x,y)
-    return mcc
-# =============================================================================
-# Functions for training/validation
-# =============================================================================
+    mcc, cm, acc = calcMCCbatch(x,y)
+    return mcc,cm, acc
+
 def calcClassImbalance(info):
 # calculate class imbalance of the dataset 
     # for 6 classes: counts = [0,0,0,0,0,0]
@@ -351,6 +360,9 @@ def calcClassImbalance(info):
         counts[3] = counts[3] + classes.count('L')
     counts = [1/x for x in counts]
     return counts
+# =============================================================================
+# Functions for training/validation
+# =============================================================================
 
 def orgaBatch (labels, predicted, orga, predicted_batch, labels_batch, label_predicted_batch):
     #to do: apply in validate
@@ -377,8 +389,9 @@ def calcMCCbatch (labels_batch, predicted_batch):
     x = sum(predicted_batch, [])
     y = sum(labels_batch,[])
     mcc = metrics.matthews_corrcoef(x, y)
-    cm = confusion_matrix(x, y,  [0, 1, 2, 3]) #[0, 1, 2, 3, 4, 5])    
-    return mcc,cm
+    cm = metrics.confusion_matrix(x, y,  [0, 1, 2, 3]) #[0, 1, 2, 3, 4, 5]) 
+    acc = metrics.accuracy_score(x,y)
+    return mcc,cm,acc
 
 def calcMCCorga(labels_batch, predicted_batch):
 #   calculate MCC over given batches of an epoch in training/validation 
@@ -386,7 +399,7 @@ def calcMCCorga(labels_batch, predicted_batch):
     mcc_list, cm_list = [],[]
     for x in range(len(labels_batch)):   
         mcc = metrics.matthews_corrcoef(predicted_batch[x], labels_batch[x])
-        cm = confusion_matrix(predicted_batch[x], labels_batch[x],  [0, 1, 2, 3]) #[0, 1, 2, 3, 4, 5])  
+        cm =  metrics.confusion_matrix(predicted_batch[x], labels_batch[x],  [0, 1, 2, 3]) #[0, 1, 2, 3, 4, 5])  
         mcc_list.append(mcc)
         cm_list.append(cm)
     return mcc_list, cm_list
@@ -413,8 +426,9 @@ def train(model, train_loader, validation_loader, num_epochs, learning_rate, dev
             if no_crf:
                 loss = criterion(outputs, labels)
             else: 
+                loss = criterion(outputs, labels)
                 outputs = outputs.permute(2,0,1) 
-                loss = -model.crf(outputs, labels.permute(1,0), mask = mask.permute(1,0))
+                loss = -model.crf(outputs, labels.permute(1,0), mask = mask.permute(1,0))+loss
                 
             # Backprop and perform Adam optimisation
             optimizer.zero_grad()
@@ -436,7 +450,7 @@ def train(model, train_loader, validation_loader, num_epochs, learning_rate, dev
                 
         # and print the results
         if (epoch%printafterepoch) == 0:            
-            mcc_train, cm_train = calcMCCbatch(labels_batch, predicted_batch)
+            mcc_train, cm_train, a = calcMCCbatch(labels_batch, predicted_batch)
             acc_train = (correct / total)*100
             loss_ave = sum(loss_train_list)/len(loss_train_list)
             print('Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}, Accuracy: {:.2f}%, MCC: {:.2f}'
@@ -470,8 +484,9 @@ def validate(validation_loader, model, dev):
                 correct += (predicted == labels).sum().item()
             else: 
                 # apply conditional random field and decode via Vertibri algorithm
+                loss = criterion(outputs, labels)
                 outputs = outputs.permute(2,0,1)
-                loss = -model.crf(outputs, labels.permute(1,0), mask = mask.permute(1,0))
+                loss = -model.crf(outputs, labels.permute(1,0), mask = mask.permute(1,0))+loss
                 predicted = nn.Tensor(model.crf.decode(outputs)).cuda()
                 correct += (predicted == labels.float()).sum().item()
             # calculate quality measurements
@@ -493,7 +508,9 @@ if __name__ == "__main__":
         except: print('Benchmark and validation split cannot be the same when doing a normal run with benchmarking because of continous biased evaluation.')
     if cross_validation and not normal_run and not gridsearch:
         print("Starting normal cross-validation run...")
-        out = cross_validate() 
+        out1,out2, labels, predictions = cross_validate() 
+        create_plts(out1, cross_validation, False, selected_split, root, learning_rate, num_epochs)  
+        create_plts(out2, cross_validation, False, selected_split, root, learning_rate, num_epochs,benchmark_crossvalid = True, labels =labels, predictions= predictions) 
     else: print('Disable normal run and gridsearch to do simple cross validation!')
     if gridsearch :     
         if cross_validation:
@@ -508,7 +525,6 @@ if __name__ == "__main__":
             learning_rate = 1e-3
             for y in range(len(all_num_epochs)):            
                 num_epochs = all_num_epochs[y]
-                weights = allweigths[y]
                 out = cross_validate()
                 cross_valid_params.append(out)
     if normal_run:
@@ -517,5 +533,5 @@ if __name__ == "__main__":
     if benchmark:
         out = main(0, benchmark_split, benchmark = True)
     if benchmarked_cross_validation: 
-        out = cross_benchmark()
+        out, labels, predictions = cross_benchmark()
     print("Runtime: ", time.time() - timer)
