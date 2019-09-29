@@ -11,10 +11,13 @@ import pandas as pd
 from collections import Counter
 import random
 import sklearn.metrics as metrics
+from operator import add 
 # =============================================================================
 # Functions to create plots
 # =============================================================================
-def create_plts(out_params, cross_validation, benchmark, split, root, learning_rate, num_epochs, mcc_orga = 0, cm_orga = 0, benchmark_crossvalid = False, labels = [], predictions = []):
+def create_plts(out_params, cross_validation, benchmark, split, root, learning_rate, num_epochs,
+                mcc_orga = 0, cm_orga = 0, benchmark_crossvalid = False, labels = [], predictions = [],
+                labels_pre= [], predictions_pre= []):
     split = str(split)
     plt.rcParams["figure.figsize"] = [9,6]
     plt.rcParams.update({'font.size': 16})
@@ -35,13 +38,18 @@ def create_plts(out_params, cross_validation, benchmark, split, root, learning_r
         plot_confusion_matrix (cm_orga[3], c, root, learning_rate, num_epochs, split, normalize=True, title = 'Benchmark split '+split+' normalized, Organism = Gram positive')
         comparisonBar(mcc_orga, root, split, learning_rate, num_epochs)
     elif benchmark_crossvalid:
-        cm_mean, cm_standard  = meanstdCM(out_params)   
-        boxplt (0,1,out_params, 'Boxplot of residual MCCs', root, learning_rate,num_epochs)
-        boxplt (2,3,out_params, 'Boxplot of global MCCs', root, learning_rate, num_epochs)
-        boxplt (4,5,out_params, 'Boxplot of standard deviation of the real cleavage site', root, learning_rate, num_epochs)
+        mccs, mccs_res, accs,acc_res, cms, cms_res = randSampler(labels,predictions)
+        mcc_orga = outListorga(out_params)
+        comparisonBar(mcc_orga, root, split, learning_rate, num_epochs)
+        cm_mean, cm_standard  = meanstdCM(cms)
+        cm_mean_res, cm_standard_res  = meanstdCM(cms_res)
+        boxplt (mccs, mccs_res , 'MCC', root, learning_rate,num_epochs)
+        boxplt (accs, acc_res, 'accuracy', root, learning_rate,num_epochs)
         plot_bar_csrel(out_params,root,split,learning_rate,num_epochs)
-        plot_confusion_matrix (cm_mean, c, root, learning_rate, num_epochs, split, normalize=True, title='Normalized benchmark with standard error between cross-validation', 
+        plot_confusion_matrix (cm_mean, c, root, learning_rate, num_epochs, split, normalize=True, title='Normalized confusion matrix of the benchmark global signal peptide predictions', 
                           cm_standard = cm_standard, cm_benchmark = True)
+        plot_confusion_matrix (cm_mean_res, c, root, learning_rate, num_epochs, split, normalize=True, title='Normalized confusion matrix of the benchmark signal peptide residue predictions', 
+                          cm_standard = cm_standard_res, cm_benchmark = True)
     else:        
         #------------------------------Loss------------------------------
         loss_val, loss_train, epochs, acc_val, acc_train, mcc_val, mcc_train = (np.array([x[0] for x in out_params]),
@@ -87,6 +95,8 @@ def create_plts(out_params, cross_validation, benchmark, split, root, learning_r
     
 def comparisonBar(mcc_orga, root, split, learning_rate, num_epochs):
     #papervalues for mcc 
+    plt.rcParams["figure.figsize"] = [14,6]
+    plt.rcParams.update({'font.size': 15})
     archea = [mcc_orga[0], 0.938 , 0.83  ,0.78]
     eukaryot = [mcc_orga[1], 0.907, 0.39, 0.42]
     gram_neg = [mcc_orga[2], 0.89, 0.8, 0.81]
@@ -98,18 +108,30 @@ def comparisonBar(mcc_orga, root, split, learning_rate, num_epochs):
     ax.set_title('Comparison of MCC scores of algorithms across organisms')
     plt.xlabel('MCC Score')
     plt.ylabel('Different algorithms')
-    plt.savefig(root + 'Pictures\\Benchmark_'+ split +'_lr_' + str(learning_rate) + '_epochs_' + str(num_epochs) + '_comparison_plot.png')
+    plt.savefig(root + 'Pictures\\Benchmark_'+ str(split) +'_lr_' + str(learning_rate) + '_epochs_' + str(num_epochs) + '_comparison_plot.png')
     plt.close()
+    plt.rcParams["figure.figsize"] = [9,6]
+
+def boxplt (glo, res, title, root, learning_rate,num_epochs):
+    plt.rcParams["figure.figsize"] = [6,6]
+    plt.subplot(1, 2, 1)
+    post, post_std = np.mean(glo), np.std(glo)
+    plt.boxplot(glo)
+    plt.title("Boxplot of the\nglobal "+title)
+    fmt = '.3f'
+    plt.xticks([1], ['Mean: '+ format(post, fmt)  +' +/- ' + format(post_std, fmt)])   
     
-def boxplt (pre,post,out, title, root, learning_rate,num_epochs):
-    x = [x[pre] for x in out]
-    y = [x[post] for x in out]
-    plt.figure()
-    plt.boxplot([x,y])
-    plt.title(title)
-    plt.xticks([1, 2], ['before post-processing', 'after post-processing'])   
-    plt.savefig(root + 'Pictures\\'+ title +'_lr_' + str(learning_rate) + '_epochs_' + str(num_epochs) + '_plot.png')
+    plt.subplot(1, 2, 2)
+    post, post_std = np.mean(res), np.std(res)
+    plt.boxplot(res)
+    plt.title("Boxplot of the\nresidue "+title)
+    fmt = '.3f'
+    plt.xticks([1], ['Mean: '+ format(post, fmt)  +' +/- ' + format(post_std, fmt)])   
+    
+    plt.tight_layout()
+    plt.savefig(root + 'Pictures\\'+ title +'_lr_' + str(learning_rate) + '_epochs_' + str(num_epochs) + '_boxplot.png')
     plt.close()
+    plt.rcParams["figure.figsize"] = [9,6]
     
 def calcSTDandMEANplot(out_params, x, y, param, root, learning_rate, num_epochs):
     mean_valid = []
@@ -240,19 +262,54 @@ def meanstdCM(cms):
 
 def randSampler (labels, predictions):
     mccs = []
-    accuracys = []
-    cms = []     
+    mccs_res = []
+    accs = []
+    acc_res = []
+    cms = []    
+    cms_res = []
+    #cs = [] 
     l = [list(label) for label in labels]
-    p = [list(label) for label in predictions]
+    p = [list(label.astype(int)) for label in predictions]
     for x in range(1000):
-        random.seed(x)
-        r_label = list(np.array(random.sample(l, 1750)).flat)
-        random.seed(x)
-        r_pred = list(np.array(random.sample(p, 1750)).flat)
+        r_label = []
+        r_pred = []
+        for y in range(len(labels)):
+            r_indice = random.sample(range(len(labels)), 1)
+            r_label.append(l[r_indice [0]])
+            r_pred.append(p[r_indice [0]])
+       # csdev = csdiff(r_label,r_pred) 
+        l2 = [label[0] for label in r_label]
+        p2 = [label[0] for label in r_pred]
+        r_pred = list(np.array(r_pred).flat)
+        r_label = list(np.array(r_label).flat)
+        mcc_gl = metrics.matthews_corrcoef(l2, p2)
+        acc_gl = metrics.accuracy_score(l2, p2)   
+        cm_gl = metrics.confusion_matrix(l2, p2,  [0, 1, 2, 3]) #[0, 1, 2, 3, 4, 5]) 
         mcc = metrics.matthews_corrcoef(r_label, r_pred)
+        acc = metrics.accuracy_score(r_label,r_pred)  
         cm = metrics.confusion_matrix(r_label, r_pred,  [0, 1, 2, 3]) #[0, 1, 2, 3, 4, 5]) 
-        acc = metrics.accuracy_score(r_label,r_pred)
-        mccs.append(mcc)
-        accuracys.append(acc)
-        cms.append(cm)
-    return mccs, accuracys, cms
+        mccs_res.append(mcc) 
+        acc_res.append(acc)
+        cms_res.append(cm)
+        mccs.append(mcc_gl)
+        accs.append(acc_gl)
+        cms.append(cm_gl)
+        #cs.append(csdev)
+    return mccs, mccs_res, accs, acc_res, cms, cms_res #, cs
+
+def csdiff(labels, predictions):
+    csdiff = 0
+    for x in range (len(labels)):
+        csdiff += abs(labels[x].count(0) - predictions[x].count(0))
+    csdiff = csdiff/len(labels)
+    return csdiff   
+ 
+def outListorga (out_params):
+    orgas = [out[10] for out in out_params]
+    res = [0,0,0,0]
+    for x in range(len(orgas)):
+        res = list(map(add, res, orgas[x])) 
+    res = [x/(len(orgas)) for x in res]
+    return res
+    
+    

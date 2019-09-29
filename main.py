@@ -26,7 +26,18 @@ root = 'C:\\Users\\Thomas\\Documents\\Uni_masters\\MasterPrak_Data\\'
 params = {'batch_size': 128,
           'shuffle': True,
           'num_workers': 0}
-num_epochs = 9
+all_params_list = [{'batch_size': 50,
+          'shuffle': True,
+          'num_workers': 0},{'batch_size': 100,
+          'shuffle': True,
+          'num_workers': 0},{'batch_size': 150,
+          'shuffle': True,
+          'num_workers': 0},{'batch_size': 200,
+          'shuffle': True,
+          'num_workers': 0},{'batch_size': 250,
+          'shuffle': True,
+          'num_workers': 0}]
+num_epochs = 17
 learning_rate = 1e-3
 weights = [7.554062537062119e-07,
  1.2681182393446364e-05,
@@ -35,47 +46,42 @@ weights = [7.554062537062119e-07,
 dev = torch.device('cuda')
 #dev = torch.device('cpu')
 class_weights = torch.FloatTensor(weights).to(dev) # only for Cross entropy loss
-printafterepoch = 4
+printafterepoch = 8
 #--------------- Disable/Enable the addition of a crf ---------------
-no_crf = False
+no_crf = True
 #--------------- Cross Validation ---------------
 cross_validation = False
-benchmarked_cross_validation = True
+benchmarked_cross_validation, benchplots = True,False
 #--------------- Parameterize grid search here ---------------
 gridsearch = False
-all_num_epochs = [21,23,25,27]
+all_num_epochs = [33,34,35,36,37]
 all_learning_rate = (1e-3, 1e-4, 5e-4 ,1e-5)
 #--------------- Benchmark ---------------
 benchmark = False
 normal_run = False
 #---Selected split to benchmark/validate upon (0-4, !must not be the same!)---
-selected_split = 0
-benchmark_split = 1
+selected_split = 1
+benchmark_split = 0
 # =============================================================================
 # Main functions
 # =============================================================================
 def cross_validate():
     # do crossvalidation
-    params_list, params_listbench = [],[]
+    params_list = []
     labels = []
     predictions = []
     print('Starting cross-validation...')
     for split in range(splits):
-        if split == benchmark_split:
-            print('Skipping benchmark split...')
-            continue
         out = main(split, benchmark_split, False)
-        outbench = main(split, benchmark_split, True)
-        labels += outbench[8][0]
-        predictions += outbench[8][1]
         params_list.append(out)
-        params_listbench.append(outbench)
-    return params_list, params_listbench, labels, predictions
+    return params_list, labels, predictions
 
 def cross_benchmark():
     params_list = []
     labels = []
     predictions = []
+    labels_pre = []
+    predictions_pre =[]
     print('Starting cross-validation...')
     for split in range(splits):
         benchmark_split = split
@@ -84,8 +90,11 @@ def cross_benchmark():
         params_list.append(out)
         labels += out[8][0]
         predictions += out[8][1]
+        labels_pre += out[9][0]
+        predictions_pre +=  out[9][1]
     create_plts(params_list, cross_validation, False, split, root, learning_rate, 
-                num_epochs,benchmark_crossvalid = True,labels = labels, predictions = predictions)  
+                num_epochs,benchmark_crossvalid = True,labels = labels, predictions = predictions,
+                labels_pre= labels_pre, predictions_pre= predictions_pre )  
     return params_list, labels, predictions
 
 def main(split,benchmark_split, benchmark = False):
@@ -103,10 +112,12 @@ def main(split,benchmark_split, benchmark = False):
             bench_dataset = CustomDataset(bench_data, bench_labels, bench_orga)
             bench_loader = DataLoader(bench_dataset, **params)
             acc, true_mcc, loss_ave, cm , mcc_orga, cm_orga, label_predicted_batch = validate(bench_loader, model, dev)
+            label_predicted_batch_pre = label_predicted_batch
             print('Confusion matrix is:\n', cm)
             mcc_res_post, mcc_glob_post, mcc_glob_pre, cs_pre, cs_post, csreldiff_pre, csreldiff_post = createcompfile(root,label_predicted_batch,benchmark_split, true_mcc)
-            create_plts(cm, cross_validation, benchmark, benchmark_split, root, learning_rate, num_epochs, mcc_orga = mcc_orga, cm_orga = cm_orga)
-            out_params = [true_mcc, mcc_res_post, mcc_glob_pre, mcc_glob_post, cs_pre, cs_post, csreldiff_pre, csreldiff_post, label_predicted_batch , cm]
+            if benchplots:
+                create_plts(cm, cross_validation, benchmark, benchmark_split, root, learning_rate, num_epochs, mcc_orga = mcc_orga, cm_orga = cm_orga)
+            out_params = [true_mcc, mcc_res_post, mcc_glob_pre, mcc_glob_post, cs_pre, cs_post, csreldiff_pre, csreldiff_post, label_predicted_batch, label_predicted_batch_pre, mcc_orga, cm_orga , cm]
             return out_params
         except:
             print('No model found for benchmarking! Start a new run with benchmark = False!')
@@ -138,9 +149,7 @@ def de_serializeInput(validation_split, benchmark_split):
             split_data = pickle.load(open(root+"pickled_files\\split_"+str(split)+"_data.pickle", "rb"))
             split_labels = pickle.load(open(root+"pickled_files\\split_"+str(split)+"_labels.pickle", "rb"))
             split_orga  = pickle.load(open(root+"pickled_files\\split_"+str(split)+"_orga.pickle", "rb"))
-            if split == benchmark_split and not benchmarked_cross_validation:
-                continue
-            elif split == validation_split:
+            if split == validation_split:
                 validation_data,validation_labels, validation_orga = split_data, split_labels, split_orga
             else:
                 train_data.extend(split_data)
@@ -155,9 +164,7 @@ def de_serializeInput(validation_split, benchmark_split):
             pickle.dump(split_data, open( root+"pickled_files\\split_"+str(split)+"_data.pickle", "wb" ))
             pickle.dump(split_labels, open( root+"pickled_files\\split_"+str(split)+"_labels.pickle", "wb" ))
             pickle.dump(split_orga, open( root+"pickled_files\\split_"+str(split)+"_orga.pickle", "wb" ))
-            if split == benchmark_split and not benchmarked_cross_validation:
-                continue
-            elif split == validation_split:
+            if split == validation_split:
                 validation_data,validation_labels, validation_orga = split_data, split_labels, split_orga
             else:
                 train_data.extend(split_data)
@@ -494,7 +501,7 @@ def validate(validation_loader, model, dev):
             result = ((correct / total) * 100) 
             predicted_batch, labels_batch, label_predicted_batch = orgaBatch(labels, predicted, orga, predicted_batch, labels_batch, label_predicted_batch)
             loss_list.append(loss.item())         
-        mcc, cm = calcMCCbatch(labels_batch, predicted_batch)
+        mcc, cm, a = calcMCCbatch(labels_batch, predicted_batch)
         mcc_orga, cm_orga = calcMCCorga(labels_batch, predicted_batch)
         loss_ave = sum(loss_list)/len(loss_list)
         print('Accuracy of the model on the validation proteins is: {:.2f}%, Loss:{:.3f} and MCC is: {:.2f}'.format(result,loss_ave,mcc))
@@ -508,9 +515,8 @@ if __name__ == "__main__":
         except: print('Benchmark and validation split cannot be the same when doing a normal run with benchmarking because of continous biased evaluation.')
     if cross_validation and not normal_run and not gridsearch:
         print("Starting normal cross-validation run...")
-        out1,out2, labels, predictions = cross_validate() 
+        out1, labels, predictions = cross_validate() 
         create_plts(out1, cross_validation, False, selected_split, root, learning_rate, num_epochs)  
-        create_plts(out2, cross_validation, False, selected_split, root, learning_rate, num_epochs,benchmark_crossvalid = True, labels =labels, predictions= predictions) 
     else: print('Disable normal run and gridsearch to do simple cross validation!')
     if gridsearch :     
         if cross_validation:
@@ -525,8 +531,10 @@ if __name__ == "__main__":
             learning_rate = 1e-3
             for y in range(len(all_num_epochs)):            
                 num_epochs = all_num_epochs[y]
+                params = all_params_list[y]
                 out = cross_validate()
                 cross_valid_params.append(out)
+                create_plts(out, cross_validation, False, selected_split, root, learning_rate, num_epochs)  
     if normal_run:
         cross_validation, gridsearch = False, False
         out = main(selected_split, benchmark_split)
