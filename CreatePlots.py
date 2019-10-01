@@ -102,7 +102,7 @@ def comparisonBar(mcc_orga, root, split, learning_rate, num_epochs):
     gram_neg = [mcc_orga[2], 0.89, 0.8, 0.81]
     gram_pos = [mcc_orga[3], 0.966, 0.97, 0.85]
     algorithms = ['Seq 2 Vec', 'Signal P5', 'LipoP', 'Philius']
-    df = pd.DataFrame({'Archea': archea, 'Eukaryot': eukaryot, 'Gram-negative bacteria':gram_neg,
+    df = pd.DataFrame({'Archaea': archea, 'Eukaryot': eukaryot, 'Gram-negative bacteria':gram_neg,
                        'Gram-positive bacteria':gram_pos}, index=algorithms)
     ax = df.plot.barh()
     ax.set_title('Comparison of MCC scores of algorithms across organisms')
@@ -177,7 +177,7 @@ def plot_bar_csrel(out_params,root,split,learning_rate,num_epochs):
     fig, ax = plt.subplots()   
     x = np.arange(len(labels))
     width = 0.35 
-    ax.bar(x - width/2, pre, width, label='Pre-processing')
+    ax.bar(x - width/2, pre, width, label='Non-processing')
     ax.bar(x + width/2, post, width, label='Post-processing')
     ax.set_ylabel('Log-occurances')
     ax.set_title('Relative deviation of the real cleavage site')
@@ -185,7 +185,7 @@ def plot_bar_csrel(out_params,root,split,learning_rate,num_epochs):
     ax.set_xticklabels(labels)
     fmt = '.3f'
     ax.set_xlabel('Relative distance to the real cleavage site\n'+
-                  'Mean deviation pre-processing: '+format(cs_pre, fmt)+' +/- '+format(cs_pre_std, fmt)+'\n'+
+                  'Mean deviation non-processing: '+format(cs_pre, fmt)+' +/- '+format(cs_pre_std, fmt)+'\n'+
                   'Mean deviation post-processing: '+format(cs_post, fmt)+' +/- '+format(cs_post_std, fmt))
     ax.legend()
     plt.tight_layout()
