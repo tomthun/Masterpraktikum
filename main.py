@@ -37,7 +37,7 @@ all_params_list = [{'batch_size': 50,
           'num_workers': 0},{'batch_size': 250,
           'shuffle': True,
           'num_workers': 0}]
-num_epochs = 17
+num_epochs = 21
 learning_rate = 1e-3
 weights = [7.554062537062119e-07,
  1.2681182393446364e-05,
@@ -48,7 +48,7 @@ dev = torch.device('cuda')
 class_weights = torch.FloatTensor(weights).to(dev) # only for Cross entropy loss
 printafterepoch = 8
 #--------------- Disable/Enable the addition of a crf ---------------
-no_crf = True
+no_crf = False
 #--------------- Cross Validation ---------------
 cross_validation = False
 benchmarked_cross_validation, benchplots = True,False

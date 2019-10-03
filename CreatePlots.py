@@ -101,7 +101,7 @@ def comparisonBar(mcc_orga, root, split, learning_rate, num_epochs):
     eukaryot = [mcc_orga[1], 0.907, 0.39, 0.42]
     gram_neg = [mcc_orga[2], 0.89, 0.8, 0.81]
     gram_pos = [mcc_orga[3], 0.966, 0.97, 0.85]
-    algorithms = ['Seq 2 Vec', 'Signal P5', 'LipoP', 'Philius']
+    algorithms = ['SeqVec', 'Signal P5', 'LipoP', 'Philius']
     df = pd.DataFrame({'Archaea': archea, 'Eukaryot': eukaryot, 'Gram-negative bacteria':gram_neg,
                        'Gram-positive bacteria':gram_pos}, index=algorithms)
     ax = df.plot.barh()
